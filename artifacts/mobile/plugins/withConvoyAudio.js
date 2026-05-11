@@ -1,7 +1,7 @@
 // Writes ConvoyAudioModule.swift into ios/<ProjectName>/ and adds it to the
 // Xcode build target so the native AVAudioSession bridge compiles into the app.
 
-const { withXcodeProject, withDangerousMod } = require("@expo/config-plugins");
+const { withXcodeProject, withDangerousMod, IOSConfig } = require("@expo/config-plugins");
 const path = require("path");
 const fs = require("fs");
 
@@ -80,7 +80,7 @@ const withConvoyAudio = (config) => {
       : false;
 
     if (!alreadyAdded) {
-      xcodeProject.addSourceFile(swiftFilePath, {}, xcodeProject.getFirstTarget().uuid);
+      IOSConfig.XcodeUtils.addBuildSourceFileToGroup({ filepath: swiftFilePath, groupName: projectName, project: xcodeProject });
     }
 
     return config;

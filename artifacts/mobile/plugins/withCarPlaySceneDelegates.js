@@ -3,7 +3,7 @@
 // them to the Xcode build target. Required so the UISceneDelegate class names
 // declared in Info.plist by withCarPlay.js resolve at runtime.
 
-const { withXcodeProject, withDangerousMod } = require("@expo/config-plugins");
+const { withXcodeProject, withDangerousMod, IOSConfig } = require("@expo/config-plugins");
 const path = require("path");
 const fs = require("fs");
 
@@ -89,7 +89,7 @@ const withCarPlaySceneDelegates = (config) => {
         : false;
 
       if (!alreadyAdded) {
-        xcodeProject.addSourceFile(filePath, {}, xcodeProject.getFirstTarget().uuid);
+        IOSConfig.XcodeUtils.addBuildSourceFileToGroup({ filepath: filePath, groupName: projectName, project: xcodeProject });
       }
     }
 
