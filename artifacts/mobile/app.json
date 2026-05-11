@@ -5,7 +5,9 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": ["convoy"],
+    "scheme": [
+      "convoy"
+    ],
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "splash": {
@@ -17,12 +19,18 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.convoy.app",
       "buildNumber": "1",
-      "backgroundModes": ["audio", "location"],
+      "backgroundModes": [
+        "audio",
+        "location"
+      ],
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Convoy needs your location to show your position to other convoy members.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Convoy needs your location in the background so other convoy members can always see where you are.",
         "NSMicrophoneUsageDescription": "Convoy needs the microphone for push-to-talk between convoy vehicles.",
-        "UIBackgroundModes": ["audio", "location"]
+        "UIBackgroundModes": [
+          "audio",
+          "location"
+        ]
       }
     },
     "android": {
@@ -73,6 +81,11 @@
       "typedRoutes": true,
       "reactCompiler": true
     },
-    "extra": {}
+    "extra": {
+      "eas": {
+        "projectId": "e19eebf5-95ef-4267-9b3e-f77182c77f9c"
+      }
+    },
+    "owner": "geoffreyatta1"
   }
 }
