@@ -1,0 +1,20 @@
+{
+  "name": "@workspace/scripts",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "hello": "tsx ./src/hello.ts",
+    "seed-convoy-products": "tsx ./src/seed-convoy-products.ts",
+    "setup-branch-protection": "tsx ./src/setup-branch-protection.ts",
+    "verify-branch-protection": "tsx ./src/setup-branch-protection.ts verify",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "tsx": "catalog:"
+  },
+  "dependencies": {
+    "stripe": "20.0.0"
+  }
+}

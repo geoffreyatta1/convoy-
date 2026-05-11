@@ -1,0 +1,150 @@
+{
+  "$schema": "https://raw.githubusercontent.com/expo/eas-cli/main/packages/eas-cli/schema.json",
+
+  "cli": {
+    "version": ">= 14.0.0",
+    "appVersionSource": "remote"
+  },
+
+  "build": {
+    // ── Development client — real iPhone ────────────────────────────────────
+    // Installs a custom dev-client build onto a registered real iPhone over
+    // the air. Use this for testing native modules on physical hardware:
+    // CarPlay (via a real car or Lightning→HDMI adapter), Agora PTT,
+    // background location, and react-native-maps.
+    //
+    // Build:   eas build --platform ios --profile development
+    // Install: scan the QR code / install link from the EAS dashboard on
+    //          a device that has been registered with `eas device:create`.
+    //
+    // Requires:
+    //   APPLE_ID env var (or interactive login during the build).
+    //   Device must be registered: run `eas device:create` first.
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "APP_VARIANT": "development"
+      }
+    },
+
+    // ── Development client — iOS Simulator ──────────────────────────────────
+    // Builds a .app bundle that installs in Xcode's iOS Simulator.
+    // Use this for CarPlay Simulator testing (Simulator → Features → CarPlay)
+    // without needing a physical device or Apple credentials beyond APPLE_ID.
+    //
+    // Build:   eas build --platform ios --profile development-simulator
+    // Install: drag the downloaded .app onto an open iOS Simulator window.
+    //
+    // Note: simulator builds do NOT run on real iPhones.
+    "development-simulator": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "ios": {
+        "simulator": true
+      },
+      "env": {
+        "APP_VARIANT": "development"
+      }
+    },
+
+    // ── Preview (real-device ad-hoc, Release build) ─────────────────────────
+    // Signed for ad-hoc distribution — installs on registered test devices
+    // without going through TestFlight. Runs in Release mode so performance
+    // matches production. Ideal for stakeholder demos and QA sessions.
+    //
+    // Build:   eas build --platform ios --profile preview
+    // Install: share the install link from the EAS dashboard.
+    //
+    // Requires: APPLE_ID, and all test devices must be registered
+    //           in your Apple Developer account (eas device:create).
+    "preview": {
+      "distribution": "internal",
+      // EAS-native build cache — restored on Expo's build workers before compilation.
+      // cacheDefaultPaths covers ~/.gradle/wrapper + ~/.gradle/caches (Android)
+      // and ~/Library/Caches/CocoaPods + ~/.cocoapods (iOS).
+      // Bump "key" (e.g. v2) after major native dependency changes (react-native
+      // version bump, new CocoaPods, changed gradle-wrapper.properties) to force
+      // a clean cache and avoid stale artifacts.
+      "cache": {
+        "key": "v1",
+        "cacheDefaultPaths": true
+      },
+      "ios": {
+        "buildConfiguration": "Release"
+      },
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "APP_VARIANT": "preview"
+      }
+    },
+
+    // ── Production (App Store / TestFlight) ─────────────────────────────────
+    // Creates a signed .ipa for App Store / TestFlight submission.
+    // EAS manages provisioning profiles and signing certificates automatically.
+    //
+    // Build:   eas build --platform ios --profile production
+    // Submit:  eas submit --platform ios --profile production
+    //
+    // Requires:
+    //   APPLE_ID              — your Apple ID email
+    //   ASC_API_KEY_ID        — App Store Connect API key ID
+    //                           (App Store Connect → Users & Access → Keys)
+    //   ASC_API_KEY_ISSUER_ID — Issuer ID from the same page
+    //   ASC_API_KEY_PATH      — path to the downloaded .p8 key file
+    //                           (set as EAS secret via `eas secret:create`)
+    //
+    // CarPlay: the com.apple.developer.carplay-navigation entitlement is
+    // declared in plugins/withCarPlay.js. Apple must APPROVE this entitlement
+    // before your app passes App Store review. Apply at:
+    //   https://developer.apple.com/contact/request/carplay/
+    // Select "Navigation" as the app type.
+    "production": {
+      "distribution": "store",
+      // EAS-native build cache — restored on Expo's build workers before compilation.
+      // cacheDefaultPaths covers ~/.gradle/wrapper + ~/.gradle/caches (Android)
+      // and ~/Library/Caches/CocoaPods + ~/.cocoapods (iOS).
+      // Bump "key" (e.g. v2) after major native dependency changes (react-native
+      // version bump, new CocoaPods, changed gradle-wrapper.properties) to force
+      // a clean cache and avoid stale artifacts.
+      "cache": {
+        "key": "v1",
+        "cacheDefaultPaths": true
+      },
+      "ios": {
+        "buildConfiguration": "Release"
+      },
+      "android": {
+        "buildType": "app-bundle"
+      },
+      "env": {
+        "APP_VARIANT": "production"
+      }
+    }
+  },
+
+  "submit": {
+    // ── App Store production submission ─────────────────────────────────────
+    // Uploads the latest production build to App Store Connect for TestFlight
+    // or App Store review.
+    //
+    // Usage: eas submit --platform ios --profile production
+    //
+    // Required environment variables (set via `eas secret:create`):
+    //   ASC_API_KEY_ID        — App Store Connect API key ID
+    //   ASC_API_KEY_ISSUER_ID — Issuer ID
+    //   ASC_API_KEY_PATH      — path to the .p8 key file
+    //   APPLE_TEAM_ID         — 10-character Apple Team ID
+    //                           (developer.apple.com/account → Membership)
+    "production": {
+      "ios": {
+        "appleTeamId": "${APPLE_TEAM_ID}",
+        "ascApiKeyIssuerId": "${ASC_API_KEY_ISSUER_ID}",
+        "ascApiKeyId": "${ASC_API_KEY_ID}",
+        "ascApiKeyPath": "${ASC_API_KEY_PATH}"
+      }
+    }
+  }
+}

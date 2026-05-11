@@ -1,0 +1,10 @@
+Welcome to Family Convoy Navigator 1.0!
+
+• Real-time convoy tracking — see every vehicle on a live map
+• Turn-by-turn navigation synced across the whole group
+• Apple CarPlay support — navigate hands-free on your car's screen
+• Push-to-talk walkie-talkie between all convoy members
+• Gap alerts when a vehicle falls too far behind
+• Hazard reporting shared instantly with the convoy
+• AI driving assistant (Convenience & Roadtrip plans)
+• Freemium plans starting at £0 — subscribe from within the app

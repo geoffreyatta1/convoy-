@@ -1,0 +1,67 @@
+uploads = []
+
+[[generated]]
+id = "a2x54PPm5vkIZ7JgyqLt7"
+uri = "file://artifacts/mobile/assets/images/icon.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "fPannTjFclsgSh2HLHiTD"
+uri = "file://artifacts/mobile/assets/carplay-screenshots/01-navigation-active.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "kjV2Qeq-Ck1C9eVT1zVMn"
+uri = "file://artifacts/mobile/assets/carplay-screenshots/02-convoy-member-list.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "9DfqDJ7IFRZlQKvDfqfk_"
+uri = "file://artifacts/mobile/assets/carplay-screenshots/03-gap-alert.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "9vaHFGBaEBJdLNl4BQyvn"
+uri = "file://artifacts/mobile/assets/carplay-screenshots/04-idle-no-convoy.png"
+type = "image"
+title = "generated_image"
+
+[[generated]]
+id = "4KovQ4FqFSh0tM5pjaxJz"
+uri = "file://artifacts/mobile/assets/carplay-screenshots/05-convoy-view-light.png"
+type = "image"
+title = "generated_image"
+
+[[outputs]]
+id = "uv0Gxp9CEEzNuw0O1O1u4"
+uri = "file://artifacts/mobile/assets/carplay-screenshots/01-navigation-active.png"
+type = "image"
+title = "01 – Navigation Active"
+
+[[outputs]]
+id = "6IuOsgUUOn46YevDusfi2"
+uri = "file://artifacts/mobile/assets/carplay-screenshots/02-convoy-member-list.png"
+type = "image"
+title = "02 – Convoy Member List"
+
+[[outputs]]
+id = "qq75m0D8qSJSaUVS5ceNP"
+uri = "file://artifacts/mobile/assets/carplay-screenshots/03-gap-alert.png"
+type = "image"
+title = "03 – Gap Alert"
+
+[[outputs]]
+id = "1N66mtrpmmruYYSTwvxMU"
+uri = "file://artifacts/mobile/assets/carplay-screenshots/04-idle-no-convoy.png"
+type = "image"
+title = "04 – Idle / No Convoy"
+
+[[outputs]]
+id = "axn6m430xHuMRMVezGOy7"
+uri = "file://artifacts/mobile/assets/carplay-screenshots/05-convoy-view-light.png"
+type = "image"
+title = "05 – Convoy View with Communication (Light Theme)"

@@ -1,0 +1,78 @@
+{
+  "expo": {
+    "name": "Family Convoy Navigator",
+    "slug": "convoy",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/icon.png",
+    "scheme": ["convoy"],
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/images/icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0f172a"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.convoy.app",
+      "buildNumber": "1",
+      "backgroundModes": ["audio", "location"],
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Convoy needs your location to show your position to other convoy members.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Convoy needs your location in the background so other convoy members can always see where you are.",
+        "NSMicrophoneUsageDescription": "Convoy needs the microphone for push-to-talk between convoy vehicles.",
+        "UIBackgroundModes": ["audio", "location"]
+      }
+    },
+    "android": {
+      "package": "com.convoy.app",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "RECORD_AUDIO",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_MICROPHONE",
+        "FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/images/icon.png"
+    },
+    "plugins": [
+      [
+        "expo-router",
+        {
+          "origin": "https://replit.com/"
+        }
+      ],
+      "expo-font",
+      "expo-web-browser",
+      "expo-location",
+      "./plugins/withCarPlay",
+      "./plugins/withCarPlaySceneDelegates",
+      "./plugins/withConvoyAudio",
+      "./plugins/withCarPlayMultitouchPatch",
+      "./plugins/withAndroidAuto",
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "deploymentTarget": "16.0"
+          },
+          "android": {
+            "compileSdkVersion": 35,
+            "targetSdkVersion": 35,
+            "minSdkVersion": 26
+          }
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
+    },
+    "extra": {}
+  }
+}
