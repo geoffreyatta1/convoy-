@@ -23,6 +23,10 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
+      "cache": {
+        "key": "v2",
+        "cacheDefaultPaths": true
+      },
       "env": {
         "APP_VARIANT": "development"
       }
@@ -40,6 +44,10 @@
     "development-simulator": {
       "developmentClient": true,
       "distribution": "internal",
+      "cache": {
+        "key": "v2",
+        "cacheDefaultPaths": true
+      },
       "ios": {
         "simulator": true
       },
@@ -67,7 +75,7 @@
       // version bump, new CocoaPods, changed gradle-wrapper.properties) to force
       // a clean cache and avoid stale artifacts.
       "cache": {
-        "key": "v1",
+        "key": "v2",
         "cacheDefaultPaths": true
       },
       "ios": {
@@ -110,7 +118,7 @@
       // version bump, new CocoaPods, changed gradle-wrapper.properties) to force
       // a clean cache and avoid stale artifacts.
       "cache": {
-        "key": "v1",
+        "key": "v2",
         "cacheDefaultPaths": true
       },
       "ios": {
