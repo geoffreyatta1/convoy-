@@ -63,6 +63,7 @@
     "zod-validation-error": "^3.4.0"
   },
   "dependencies": {
+    "@expo/config-plugins": "^55.0.8",
     "@supabase/supabase-js": "^2.105.1",
     "expo-av": "^16.0.8",
     "expo-clipboard": "~8.0.8",
