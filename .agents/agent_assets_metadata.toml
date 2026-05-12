@@ -65,3 +65,9 @@ id = "axn6m430xHuMRMVezGOy7"
 uri = "file://artifacts/mobile/assets/carplay-screenshots/05-convoy-view-light.png"
 type = "image"
 title = "05 – Convoy View with Communication (Light Theme)"
+
+[[outputs]]
+id = "1K9p8cnqSuCS4_oYzf4QN"
+uri = "file://family-convoy-navigator.zip"
+type = "unspecified"
+title = "Family Convoy Navigator — Full Source Code"
