@@ -17,7 +17,7 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.convoy.app",
+      "bundleIdentifier": "com.geoffreyatta.convoy",
       "buildNumber": "1",
       "backgroundModes": [
         "audio",
@@ -38,7 +38,7 @@
       }
     },
     "android": {
-      "package": "com.convoy.app",
+      "package": "com.geoffreyatta.convoy",
       "permissions": [
         "ACCESS_FINE_LOCATION",
         "ACCESS_COARSE_LOCATION",
