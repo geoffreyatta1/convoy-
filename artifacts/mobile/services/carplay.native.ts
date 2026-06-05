@@ -615,15 +615,24 @@ function subscribeMultitouchEvents(): (() => void) | null {
 
     // iOS 26 multitouch (CarPlay Ultra) — emitted via withCarPlayMultitouchPatch
     // vendor patch; no-op on earlier OS versions where events are never emitted.
-    const pinchSub = emitter.addListener?.("pinchZoom", (e: { scale: number }) => {
-      DeviceEventEmitter.emit("CARPLAY_PINCH_ZOOM", { scale: e.scale ?? 1 });
-    });
-    const pitchSub = emitter.addListener?.("twoFingerPitch", (e: { pitch: number }) => {
-      DeviceEventEmitter.emit("CARPLAY_PITCH", { pitch: e.pitch ?? 0 });
-    });
-    const rotateSub = emitter.addListener?.("twoFingerRotate", (e: { heading: number }) => {
-      DeviceEventEmitter.emit("CARPLAY_ROTATE", { heading: e.heading ?? 0 });
-    });
+    // Wrapped in try/catch so unsupported events do not throw when the patch
+    // plugin is disabled (e.g. CarPlay entitlement not yet granted).
+    let pinchSub: any, pitchSub: any, rotateSub: any;
+    try {
+      pinchSub = emitter.addListener?.("pinchZoom" as any, (e: { scale: number }) => {
+        DeviceEventEmitter.emit("CARPLAY_PINCH_ZOOM", { scale: e.scale ?? 1 });
+      });
+    } catch {}
+    try {
+      pitchSub = emitter.addListener?.("twoFingerPitch" as any, (e: { pitch: number }) => {
+        DeviceEventEmitter.emit("CARPLAY_PITCH", { pitch: e.pitch ?? 0 });
+      });
+    } catch {}
+    try {
+      rotateSub = emitter.addListener?.("twoFingerRotate" as any, (e: { heading: number }) => {
+        DeviceEventEmitter.emit("CARPLAY_ROTATE", { heading: e.heading ?? 0 });
+      });
+    } catch {}
 
     return () => {
       try { panBeginSub?.remove?.(); }  catch {}
