@@ -58,6 +58,7 @@
       "favicon": "./assets/images/icon.png"
     },
     "plugins": [
+      "react-native-maps",
       [
         "expo-router",
         {
