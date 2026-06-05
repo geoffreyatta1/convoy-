@@ -30,7 +30,8 @@
         "UIBackgroundModes": [
           "audio",
           "location"
-        ]
+        ],
+        "ITSAppUsesNonExemptEncryption": false
       },
       "config": {
         "googleMapsApiKey": "AIzaSyB2PrKbDG9D5q10k54ipEF9nb6sUsZWj4k"
