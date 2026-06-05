@@ -67,11 +67,7 @@
       "expo-font",
       "expo-web-browser",
       "expo-location",
-      "./plugins/withCarPlay",
-      "./plugins/withCarPlaySceneDelegates",
       "./plugins/withConvoyAudio",
-      "./plugins/withCarPlayMultitouchPatch",
-      "./plugins/withAndroidAuto",
       [
         "expo-build-properties",
         {
