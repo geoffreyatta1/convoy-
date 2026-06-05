@@ -15,6 +15,8 @@ export interface AndroidAutoState {
   }>;
   isTalking: boolean;
   destination?: string;
+  /** Active regroup pin broadcast by a convoy member, if any. */
+  regroupPin?: { name: string; lat: number; lng: number };
 }
 
 export function registerAndroidAutoCallbacks(_start: () => void, _stop: () => void) {}

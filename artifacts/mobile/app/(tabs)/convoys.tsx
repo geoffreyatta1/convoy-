@@ -3,9 +3,8 @@ import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import * as Location from "expo-location";
 import { useRouter } from "expo-router";
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useState } from "react";
 import {
-  ActivityIndicator,
   Alert,
   KeyboardAvoidingView,
   Modal,
@@ -25,8 +24,6 @@ import { useConvoy } from "@/context/ConvoyContext";
 import { useProfile } from "@/context/ProfileContext";
 import { useSubscription } from "@/context/SubscriptionContext";
 import { HazardType } from "@/services/hazards";
-import { geocodeAddress, GeoResult } from "@/services/routing";
-import { fetchNearbyDrivingRoads, DrivingRoad } from "@/services/best-driving-roads";
 
 type ModalMode = "none" | "create" | "join";
 
@@ -34,7 +31,7 @@ export default function ConvoysScreen() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { session, myVehicle, createConvoy, joinConvoy, leaveConvoy, setDestination, reportHazard } = useConvoy();
+  const { session, myVehicle, createConvoy, joinConvoy, leaveConvoy, reportHazard } = useConvoy();
   const { config, canAddMember } = useSubscription();
   const { profile } = useProfile();
 
@@ -42,12 +39,6 @@ export default function ConvoysScreen() {
 
   // Create convoy state
   const [convoyName, setConvoyName] = useState("Family Road Trip");
-  const [destQuery, setDestQuery] = useState("");
-  const [destResults, setDestResults] = useState<GeoResult[]>([]);
-  const [selectedDest, setSelectedDest] = useState<GeoResult | null>(null);
-  const [nearbyRoads, setNearbyRoads] = useState<DrivingRoad[]>([]);
-  const [destSearching, setDestSearching] = useState(false);
-  const destDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Join convoy state
   const [joinCode, setJoinCode] = useState("");
@@ -55,71 +46,6 @@ export default function ConvoysScreen() {
   const [showHazardPicker, setShowHazardPicker] = useState(false);
 
   const topPad = Platform.OS === "web" ? Math.max(insets.top, 67) : insets.top;
-
-  // Load nearby best driving roads when create modal opens
-  const loadNearbyRoads = useCallback(async () => {
-    setNearbyRoads([]);
-    try {
-      let lat = myVehicle?.location.latitude;
-      let lng = myVehicle?.location.longitude;
-      if (!lat || !lng) {
-        const { status } = await Location.requestForegroundPermissionsAsync();
-        if (status === "granted") {
-          const pos = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-          lat = pos.coords.latitude;
-          lng = pos.coords.longitude;
-        }
-      }
-      if (lat && lng) {
-        const roads = await fetchNearbyDrivingRoads(lat, lng, 250);
-        setNearbyRoads(roads);
-      }
-    } catch {}
-  }, [myVehicle]);
-
-  // Debounced destination search
-  useEffect(() => {
-    if (!destQuery.trim() || selectedDest) {
-      setDestResults([]);
-      return;
-    }
-    if (destDebounceRef.current) clearTimeout(destDebounceRef.current);
-    destDebounceRef.current = setTimeout(async () => {
-      setDestSearching(true);
-      const results = await geocodeAddress(destQuery);
-      setDestResults(results.slice(0, 5));
-      setDestSearching(false);
-    }, 400);
-    return () => {
-      if (destDebounceRef.current) clearTimeout(destDebounceRef.current);
-    };
-  }, [destQuery, selectedDest]);
-
-  const handleSelectDest = (result: GeoResult) => {
-    setSelectedDest(result);
-    setDestQuery(result.name);
-    setDestResults([]);
-    if (convoyName === "Family Road Trip") {
-      setConvoyName(result.name);
-    }
-    if (Platform.OS !== "web") Haptics.selectionAsync();
-  };
-
-  const handleSelectRoad = (road: DrivingRoad) => {
-    const geo: GeoResult = {
-      name: road.name,
-      displayName: road.description ?? road.name,
-      latitude: road.latitude,
-      longitude: road.longitude,
-    };
-    handleSelectDest(geo);
-  };
-
-  const handleClearDest = () => {
-    setSelectedDest(null);
-    setDestQuery("");
-    setDestResults([]);
-  };
 
   const handleReportHazard = async (type: HazardType) => {
     let lat = myVehicle?.location.latitude;
@@ -142,13 +68,10 @@ export default function ConvoysScreen() {
   };
 
   const handleCreate = async () => {
-    const name = convoyName.trim() || selectedDest?.name || "Family Road Trip";
+    const name = convoyName.trim() || "Family Road Trip";
     setLoading(true);
     if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     await createConvoy(name, profile.displayName);
-    if (selectedDest) {
-      setDestination(selectedDest.name, selectedDest.latitude, selectedDest.longitude);
-    }
     setLoading(false);
     setModalMode("none");
     router.push("/(tabs)/map");
@@ -200,11 +123,7 @@ export default function ConvoysScreen() {
   const openCreate = () => {
     if (Platform.OS !== "web") Haptics.selectionAsync();
     setConvoyName("Family Road Trip");
-    setDestQuery("");
-    setSelectedDest(null);
-    setDestResults([]);
     setModalMode("create");
-    loadNearbyRoads();
   };
 
   return (
@@ -431,85 +350,6 @@ export default function ConvoysScreen() {
               />
             </View>
 
-            {/* Destination Search */}
-            <View style={styles.field}>
-              <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>DESTINATION</Text>
-              <View style={[styles.destInputWrap, { backgroundColor: colors.card, borderColor: selectedDest ? colors.primary : colors.border }]}>
-                <MaterialCommunityIcons
-                  name={selectedDest ? "map-marker-check" : "map-search"}
-                  size={18}
-                  color={selectedDest ? colors.primary : colors.mutedForeground}
-                  style={{ marginLeft: 12 }}
-                />
-                <TextInput
-                  style={[styles.destInput, { color: colors.foreground }]}
-                  value={destQuery}
-                  onChangeText={(t) => {
-                    setDestQuery(t);
-                    if (selectedDest) setSelectedDest(null);
-                  }}
-                  placeholder="Search for a destination…"
-                  placeholderTextColor={colors.mutedForeground}
-                  returnKeyType="search"
-                />
-                {destSearching && <ActivityIndicator size="small" color={colors.primary} style={{ marginRight: 12 }} />}
-                {selectedDest && !destSearching && (
-                  <TouchableOpacity onPress={handleClearDest} style={{ marginRight: 12 }}>
-                    <MaterialCommunityIcons name="close-circle" size={18} color={colors.mutedForeground} />
-                  </TouchableOpacity>
-                )}
-              </View>
-
-              {/* Search results */}
-              {destResults.length > 0 && (
-                <View style={[styles.resultsList, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                  {destResults.map((r, i) => (
-                    <React.Fragment key={`${r.latitude}-${r.longitude}-${i}`}>
-                      {i > 0 && <View style={[styles.resultDivider, { backgroundColor: colors.border }]} />}
-                      <TouchableOpacity style={styles.resultRow} onPress={() => handleSelectDest(r)}>
-                        <MaterialCommunityIcons name="map-marker-outline" size={16} color={colors.mutedForeground} />
-                        <View style={{ flex: 1 }}>
-                          <Text style={[styles.resultName, { color: colors.foreground }]} numberOfLines={1}>
-                            {r.name}
-                          </Text>
-                          <Text style={[styles.resultSub, { color: colors.mutedForeground }]} numberOfLines={1}>
-                            {r.displayName}
-                          </Text>
-                        </View>
-                      </TouchableOpacity>
-                    </React.Fragment>
-                  ))}
-                </View>
-              )}
-            </View>
-
-            {/* Nearby best driving roads suggestions */}
-            {nearbyRoads.length > 0 && !selectedDest && (
-              <View style={styles.field}>
-                <Text style={[styles.fieldLabel, { color: colors.mutedForeground }]}>SCENIC ROAD SUGGESTIONS</Text>
-                <View style={[styles.roadsCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
-                  {nearbyRoads.map((road, i) => (
-                    <React.Fragment key={road.id}>
-                      {i > 0 && <View style={[styles.resultDivider, { backgroundColor: colors.border }]} />}
-                      <TouchableOpacity style={styles.roadRow} onPress={() => handleSelectRoad(road)}>
-                        <View style={[styles.roadIcon, { backgroundColor: colors.primary + "18" }]}>
-                          <MaterialCommunityIcons name="road" size={16} color={colors.primary} />
-                        </View>
-                        <View style={{ flex: 1 }}>
-                          <Text style={[styles.roadName, { color: colors.foreground }]}>{road.name}</Text>
-                          <Text style={[styles.roadSub, { color: colors.mutedForeground }]} numberOfLines={1}>
-                            {road.region ?? road.country}
-                            {road.distanceKm != null ? ` · ${road.distanceKm} km away` : ""}
-                          </Text>
-                        </View>
-                        <MaterialCommunityIcons name="chevron-right" size={16} color={colors.mutedForeground} />
-                      </TouchableOpacity>
-                    </React.Fragment>
-                  ))}
-                </View>
-              </View>
-            )}
-
             <View style={[styles.tierInfo, { backgroundColor: colors.card, borderColor: colors.border }]}>
               <MaterialCommunityIcons name="information-outline" size={16} color={colors.primary} />
               <Text style={[styles.tierInfoText, { color: colors.mutedForeground }]}>
@@ -639,18 +479,6 @@ const styles = StyleSheet.create({
   fieldLabel: { fontSize: 11, fontWeight: "700", letterSpacing: 1.2, fontFamily: "Inter_700Bold" },
   input: { height: 52, borderRadius: 12, borderWidth: 1, paddingHorizontal: 16, fontSize: 15, fontFamily: "Inter_400Regular" },
   codeInput: { fontSize: 24, fontWeight: "700", letterSpacing: 4, textAlign: "center", fontFamily: "Inter_700Bold" },
-  destInputWrap: { height: 52, borderRadius: 12, borderWidth: 1, flexDirection: "row", alignItems: "center", gap: 8 },
-  destInput: { flex: 1, height: "100%", fontSize: 15, fontFamily: "Inter_400Regular" },
-  resultsList: { borderRadius: 12, borderWidth: 1, overflow: "hidden", marginTop: -4 },
-  resultDivider: { height: 1 },
-  resultRow: { flexDirection: "row", alignItems: "center", gap: 10, padding: 12 },
-  resultName: { fontSize: 14, fontFamily: "Inter_600SemiBold" },
-  resultSub: { fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 1 },
-  roadsCard: { borderRadius: 12, borderWidth: 1, overflow: "hidden" },
-  roadRow: { flexDirection: "row", alignItems: "center", gap: 10, padding: 12 },
-  roadIcon: { width: 32, height: 32, borderRadius: 8, alignItems: "center", justifyContent: "center" },
-  roadName: { fontSize: 14, fontWeight: "600", fontFamily: "Inter_600SemiBold" },
-  roadSub: { fontSize: 12, fontFamily: "Inter_400Regular", marginTop: 1 },
   tierInfo: { flexDirection: "row", alignItems: "center", gap: 8, padding: 12, borderRadius: 10, borderWidth: 1 },
   tierInfoText: { fontSize: 13, fontFamily: "Inter_400Regular", flex: 1, lineHeight: 18 },
   primaryBtn: { flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 10, height: 56, borderRadius: 16 },

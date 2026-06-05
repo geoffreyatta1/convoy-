@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request } from "express";
-import { openai } from "@workspace/integrations-openai-ai-server";
+import { ai } from "@workspace/integrations-gemini-ai";
 import { requireAuth } from "../middlewares/requireAuth";
 
 const router: IRouter = Router();
@@ -33,47 +33,47 @@ export interface AiCommandResponse {
 }
 
 const SYSTEM_PROMPT = `You are a driving assistant for the Convoy family navigation app.
-Your job is to interpret a driver's voice command and return a structured JSON action.
+Listen to the driver's voice command, transcribe it exactly, then classify the intent.
 
 Supported actions:
-- report_hazard: The driver wants to report a hazard (police/speed camera, accident/crash, construction/roadworks, debris/obstacle, other hazard)
-- read_gaps: The driver wants to know how far behind any convoy members are
-- read_eta: The driver wants to know the ETA or remaining distance to the destination
-- read_convoy: The driver wants to know who is in the convoy or how many cars
-- stop_request: The driver wants to stop or suggests stopping (fuel/petrol, food, bathroom, rest break, general stop)
-- unknown: The command doesn't match any known action
+- report_hazard: driver wants to report a hazard (police/speed camera, accident/crash, construction/roadworks, debris/obstacle, other)
+- read_gaps: driver wants to know how far behind any convoy members are
+- read_eta: driver wants to know ETA or remaining distance to destination
+- read_convoy: driver wants to know who is in the convoy or how many cars
+- stop_request: driver wants to stop or suggests stopping (fuel/petrol, food, bathroom, rest break, general stop)
+- unknown: command doesn't match any known action
 
-For report_hazard, also determine the hazard type:
-- police: mentions police, cop, camera, speed trap, patrol
-- accident: mentions accident, crash, collision, wreck
-- construction: mentions construction, roadworks, lane closed, orange cones
-- debris: mentions debris, object, rock, tire, fallen
+For report_hazard, classify hazardType:
+- police: police, cop, camera, speed trap, patrol
+- accident: accident, crash, collision, wreck
+- construction: construction, roadworks, lane closed, cones
+- debris: debris, object, rock, tire, fallen
 - other: any other hazard
 
-For stop_request, also determine the stop type:
-- fuel: mentions fuel, gas, petrol, diesel, charging, fill up, tank
-- food: mentions food, hungry, eat, lunch, dinner, snack, McDonald's, drive-through
-- bathroom: mentions bathroom, toilet, restroom, loo, nature, stretch legs
-- rest: mentions tired, rest, break, nap, pull over, breathe
-- general: any other stop suggestion
+For stop_request, classify stopType:
+- fuel: fuel, gas, petrol, diesel, charging, fill up, tank
+- food: food, hungry, eat, lunch, dinner, snack, drive-through
+- bathroom: bathroom, toilet, restroom, loo, nature, stretch legs
+- rest: tired, rest, break, nap, pull over
+- general: any other stop
 
-Respond ONLY with valid JSON in this exact format:
+Respond ONLY with valid JSON in this exact format (no markdown, no extra text):
 {
+  "transcript": "exact words spoken",
   "action": "report_hazard" | "read_gaps" | "read_eta" | "read_convoy" | "stop_request" | "unknown",
   "hazardType": "police" | "accident" | "construction" | "debris" | "other",
   "stopType": "fuel" | "food" | "bathroom" | "rest" | "general",
   "confirmationMessage": "short TTS-friendly confirmation under 10 words"
 }
 
-hazardType is only required when action is "report_hazard".
-stopType is only required when action is "stop_request".
-confirmationMessage should be natural, brief, and confirm what was done.
+hazardType only required when action is report_hazard.
+stopType only required when action is stop_request.
+confirmationMessage should be natural and brief.
 Examples:
-- "Police hazard reported ahead" 
-- "Alex is 230 metres behind"
+- "Police hazard reported ahead"
+- "Finding a fuel stop for the convoy"
 - "12 minutes to destination"
 - "3 cars in the convoy"
-- "Finding a fuel stop for the convoy"
 `;
 
 function buildConvoyContext(state: ConvoyStateInput): string {
@@ -145,21 +145,53 @@ router.post("/ai-command", requireAuth, async (req: Request, res): Promise<void>
   }
 
   try {
-    const audioBuffer = Buffer.from(audioBase64, "base64");
     const detectedMime = mimeType ?? "audio/m4a";
-    const fileExtension = detectedMime.includes("mp4") || detectedMime.includes("m4a") ? "m4a"
-      : detectedMime.includes("wav") ? "wav"
-      : detectedMime.includes("webm") ? "webm"
-      : detectedMime.includes("mp3") || detectedMime.includes("mpeg") ? "mp3"
-      : "m4a";
+    const convoyContext = buildConvoyContext(convoyState);
 
-    const audioFile = new File([audioBuffer], `recording.${fileExtension}`, { type: detectedMime });
-    const transcription = await openai.audio.transcriptions.create({
-      file: audioFile,
-      model: "gpt-4o-mini-transcribe",
-      response_format: "json",
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [
+        {
+          role: "user",
+          parts: [
+            {
+              inlineData: {
+                mimeType: detectedMime,
+                data: audioBase64,
+              },
+            },
+            {
+              text: `Convoy context: ${convoyContext}\n\nTranscribe the audio and classify the driver's command. Respond with JSON only.`,
+            },
+          ],
+        },
+      ],
+      config: {
+        systemInstruction: SYSTEM_PROMPT,
+        maxOutputTokens: 8192,
+      },
     });
-    const transcript = transcription.text.trim();
+
+    const rawText = response.text ?? "{}";
+
+    // Strip markdown code fences if Gemini wraps in ```json ... ```
+    const cleaned = rawText.replace(/^```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+
+    let parsed: {
+      transcript?: string;
+      action?: string;
+      hazardType?: string;
+      stopType?: string;
+      confirmationMessage?: string;
+    } = {};
+
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch {
+      req.log.warn({ rawText }, "Failed to parse Gemini classification JSON");
+    }
+
+    const transcript = (parsed.transcript ?? "").trim();
 
     if (!transcript) {
       res.json({
@@ -168,24 +200,6 @@ router.post("/ai-command", requireAuth, async (req: Request, res): Promise<void>
         confirmationMessage: "I didn't catch that",
       } satisfies AiCommandResponse);
       return;
-    }
-
-    const convoyContext = buildConvoyContext(convoyState);
-    const classifyResponse = await openai.chat.completions.create({
-      model: "gpt-5-mini",
-      max_completion_tokens: 200,
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: `Convoy context: ${convoyContext}\n\nDriver said: "${transcript}"` },
-      ],
-    });
-
-    const rawJson = classifyResponse.choices[0]?.message?.content ?? "{}";
-    let parsed: { action?: string; hazardType?: string; stopType?: string; confirmationMessage?: string } = {};
-    try {
-      parsed = JSON.parse(rawJson);
-    } catch {
-      req.log.warn({ rawJson }, "Failed to parse AI classification JSON");
     }
 
     const actionType = parsed.action ?? "unknown";
@@ -207,7 +221,8 @@ router.post("/ai-command", requireAuth, async (req: Request, res): Promise<void>
     } else if (actionType === "stop_request") {
       const stopType = (parsed.stopType ?? "general") as StopRequestType;
       action = { type: "stop_request", stopType };
-      const stopLabel = stopType === "fuel" ? "a fuel stop"
+      const stopLabel =
+        stopType === "fuel" ? "a fuel stop"
         : stopType === "food" ? "a food stop"
         : stopType === "bathroom" ? "a bathroom break"
         : stopType === "rest" ? "a rest break"
@@ -218,7 +233,7 @@ router.post("/ai-command", requireAuth, async (req: Request, res): Promise<void>
       confirmationMessage = "I didn't understand that command";
     }
 
-    req.log.info({ transcript, action: action.type }, "AI command processed");
+    req.log.info({ transcript, action: action.type }, "AI command processed via Gemini");
 
     res.json({
       transcript,

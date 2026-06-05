@@ -52,6 +52,9 @@ function withCarPlay(config) {
     }
     const manifest = cfg.modResults.UIApplicationSceneManifest;
 
+    // Must be false — the app does not support multiple windows on iPhone.
+    manifest.UIApplicationSupportsMultipleScenes = false;
+
     // ── Dashboard and Instrument Cluster support ──────────────────────────────
     // Required by the Feb 2026 CarPlay Developer Guide so the map view appears
     // in the CarPlay Dashboard (bottom strip while music/maps share the screen)
@@ -63,6 +66,22 @@ function withCarPlay(config) {
       manifest.UISceneConfigurations = {};
     }
     const scenes = manifest.UISceneConfigurations;
+
+    // ── Main iPhone window scene ──────────────────────────────────────────────
+    // iOS REQUIRES a UIWindowSceneSessionRoleApplication entry whenever any
+    // CPTemplateApplication* entries are present. Without it iOS cannot create
+    // the main app window under scene-based lifecycle, breaking CarPlay session
+    // establishment entirely.
+    // SceneDelegate.swift (written by withCarPlaySceneDelegates) adopts the
+    // RCTAppDelegate-managed window and attaches it to the UIWindowScene.
+    if (!scenes.UIWindowSceneSessionRoleApplication) {
+      scenes.UIWindowSceneSessionRoleApplication = [
+        {
+          UISceneConfigurationName: "Default Configuration",
+          UISceneDelegateClassName: "$(PRODUCT_MODULE_NAME).SceneDelegate",
+        },
+      ];
+    }
 
     // ── Main CarPlay scene ────────────────────────────────────────────────────
     if (!scenes.CPTemplateApplicationSceneSessionRoleApplication) {

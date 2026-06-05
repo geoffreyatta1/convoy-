@@ -17,6 +17,9 @@ module.exports = {
     ...appJson.expo.ios,
     config: {
       ...appJson.expo.ios?.config,
+      // Setting googleMapsApiKey causes the react-native-maps Expo plugin to
+      // include the Google Maps iOS SDK pod and AirGoogleMaps, enabling
+      // PROVIDER_GOOGLE on iOS in EAS builds.
       googleMapsApiKey,
     },
   },

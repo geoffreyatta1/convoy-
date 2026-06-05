@@ -11,13 +11,14 @@ import {
 } from "react-native";
 import MapView, { Marker, Polyline, PROVIDER_DEFAULT } from "react-native-maps";
 
-import { NavigationState, Vehicle } from "@/context/ConvoyContext";
+import { MergeState, NavigationState, Vehicle } from "@/context/ConvoyContext";
 import { useColors } from "@/hooks/useColors";
 
 interface MiniMapViewProps {
   vehicles: Vehicle[];
   navigation: NavigationState;
   gapWarnings?: Set<string>;
+  mergeState?: MergeState | null;
 }
 
 function fmtMi(m: number): string {
@@ -177,6 +178,22 @@ export default function MiniMapView(props: MiniMapViewProps) {
         ]}
       >
         <MapContent {...props} mapWidth={140} mapHeight={120} polylineWidth={2} />
+        {props.mergeState && !props.mergeState.onConvoyRoute && (() => {
+          const distM = props.mergeState.distanceToMergeM;
+          const myVeh = props.vehicles.find((v) => v.isMe);
+          // speed is in mph → convert to m/s; fallback 50 km/h (13.9 m/s)
+          const speedMs = myVeh?.location.speed ? myVeh.location.speed * 0.44704 : 50 / 3.6;
+          const etaMin = Math.max(1, Math.round(distM / speedMs / 60));
+          const distLabel = distM < 1000 ? `${Math.round(distM)}m` : `${(distM / 1000).toFixed(1)}km`;
+          return (
+            <View style={[styles.joinPill, { backgroundColor: "#f59e0b22", borderColor: "#f59e0b44" }]}>
+              <MaterialCommunityIcons name="map-marker-path" size={9} color="#f59e0b" />
+              <Text style={styles.joinPillText} numberOfLines={1}>
+                {`${distLabel} to convoy · ~${etaMin} min`}
+              </Text>
+            </View>
+          );
+        })()}
         <View style={[styles.pill, { borderTopColor: colors.border }]}>
           <MaterialCommunityIcons
             name="map-marker-distance"
@@ -296,6 +313,23 @@ const styles = StyleSheet.create({
       },
       android: { elevation: 6 },
     }),
+  },
+  joinPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    marginHorizontal: 6,
+    marginTop: 4,
+  },
+  joinPillText: {
+    fontSize: 9,
+    fontWeight: "700",
+    color: "#f59e0b",
+    flexShrink: 1,
   },
   pill: {
     flexDirection: "row",

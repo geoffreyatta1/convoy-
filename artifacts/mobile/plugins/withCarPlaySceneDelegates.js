@@ -8,6 +8,38 @@ const path = require("path");
 const fs = require("fs");
 
 const FILES = {
+  // ── Main application window scene ─────────────────────────────────────────
+  // iOS requires a UIWindowSceneSessionRoleApplication entry in the
+  // UIApplicationSceneManifest whenever any CPTemplateApplication* scene
+  // entries are present. That entry references this class.
+  //
+  // React Native (RCTAppDelegate / EXAppDelegateWrapper) creates the root
+  // UIWindow in application:didFinishLaunchingWithOptions: before any scene
+  // delegate fires. Here we simply adopt that window and attach it to the
+  // incoming UIWindowScene so the app renders correctly under scene-based
+  // lifecycle while CarPlay scenes are active.
+  "SceneDelegate.swift": `import UIKit
+
+class SceneDelegate: UIResponder, UIWindowSceneDelegate {
+
+  var window: UIWindow?
+
+  func scene(
+    _ scene: UIScene,
+    willConnectTo session: UISceneSession,
+    options connectionOptions: UIScene.ConnectionOptions
+  ) {
+    guard let windowScene = scene as? UIWindowScene else { return }
+    // Adopt the window that RCTAppDelegate already configured and bind it
+    // to this UIWindowScene so the React Native root view is visible.
+    if let existingWindow = UIApplication.shared.delegate?.window ?? nil {
+      window = existingWindow
+      window?.windowScene = windowScene
+    }
+  }
+}
+`,
+
   "CarPlayDashboardSceneDelegate.swift": `import CarPlay
 
 class CarPlayDashboardSceneDelegate: UIResponder, CPTemplateApplicationDashboardSceneDelegate {

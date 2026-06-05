@@ -235,6 +235,13 @@ export default function NavPanel({ isRecalculating = false, onSuggestStop }: Nav
 
   return (
     <View style={[styles.panel, { backgroundColor: panelBg }]}>
+      {/* Badge: follower synced from leader's navigation */}
+      {!isLeader && nav.navSource === "leader" && !mergeState?.onConvoyRoute && (
+        <View style={styles.badgeRow}>
+          <MaterialCommunityIcons name="car-multiple" size={13} color="#fff" />
+          <Text style={styles.badgeText}>FOLLOWING CONVOY</Text>
+        </View>
+      )}
       {/* Badge shown when a follower has just joined the route */}
       {!isLeader && mergeState?.onConvoyRoute && (
         <View style={styles.badgeRow}>

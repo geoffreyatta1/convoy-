@@ -11,6 +11,7 @@ import Animated, {
 
 import { Vehicle } from "@/context/ConvoyContext";
 import { useColors } from "@/hooks/useColors";
+import { haversineMeters } from "@/services/routing";
 
 interface ConvoyFormationProps {
   vehicles: Vehicle[];
@@ -24,6 +25,14 @@ interface ConvoyFormationProps {
   isLeader?: boolean;
   /** Called when the leader selects "Make Lead" from a vehicle's action sheet */
   onLeaderHandoff?: (vehicle: Vehicle) => void;
+  /** True when the current user is actively joining the convoy route */
+  isJoining?: boolean;
+  /** Straight-line distance to the convoy merge point in metres (while joining) */
+  distanceToMergeM?: number;
+  /** ID of the current user's vehicle (to identify "my" card while joining) */
+  myVehicleId?: string;
+  /** Per-vehicle regroup pin ETA data (keyed by vehicleId) */
+  vehicleRegroupEtas?: Map<string, { distanceM: number; etaS: number }>;
 }
 
 function VehicleCard({
@@ -32,6 +41,9 @@ function VehicleCard({
   colors,
   isLagging,
   isTalkingTo,
+  isJoining,
+  distanceToMergeM,
+  regroupEta,
   onTap,
 }: {
   vehicle: Vehicle;
@@ -39,18 +51,21 @@ function VehicleCard({
   colors: ReturnType<typeof useColors>;
   isLagging?: boolean;
   isTalkingTo?: boolean;
+  isJoining?: boolean;
+  distanceToMergeM?: number;
+  regroupEta?: { distanceM: number; etaS: number };
   onTap?: () => void;
 }) {
   const pulse = useSharedValue(1);
 
   React.useEffect(() => {
-    if (vehicle.isMe || isTalkingTo) {
+    if (isTalkingTo || isJoining) {
       pulse.value = withRepeat(withTiming(1.06, { duration: 900 }), -1, true);
     } else {
       pulse.value = withTiming(1, { duration: 200 });
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- pulse is a stable Reanimated shared value
-  }, [vehicle.isMe, isTalkingTo]);
+  }, [isTalkingTo, isJoining]);
 
   const animStyle = useAnimatedStyle(() => ({
     transform: [{ scale: pulse.value }],
@@ -64,8 +79,13 @@ function VehicleCard({
     ? colors.primary + "22"
     : colors.card;
 
+  const joiningNear = isJoining && (distanceToMergeM ?? Infinity) < 200;
+  const joiningColor = joiningNear ? "#22c55e" : "#f59e0b";
+
   const cardBorder = isTalkingTo
     ? colors.primary
+    : isJoining
+    ? joiningColor
     : isLagging
     ? "#ef4444"
     : vehicle.isMe
@@ -121,9 +141,31 @@ function VehicleCard({
             <Text style={[styles.talkingText, { color: colors.primary }]}>Talking</Text>
           </View>
         )}
-        {isLagging && !isTalkingTo && (
+        {isLagging && !isTalkingTo && !isJoining && (
           <View style={styles.gapBadge}>
             <Text style={styles.gapBadgeText}>Behind</Text>
+          </View>
+        )}
+        {regroupEta && !isJoining && (
+          <View style={[styles.regroupEtaBadge, { backgroundColor: "#f59e0b22" }]}>
+            <Text style={[styles.regroupEtaText, { color: "#f59e0b" }]}>
+              {regroupEta.etaS < 60
+                ? "<1 min"
+                : `${Math.ceil(regroupEta.etaS / 60)} min`}
+            </Text>
+          </View>
+        )}
+        {isJoining && (
+          <View style={[styles.joiningBadge, { backgroundColor: joiningColor + "22" }]}>
+            <Text style={[styles.joiningText, { color: joiningColor }]}>
+              {joiningNear
+                ? "Joining!"
+                : distanceToMergeM != null
+                ? distanceToMergeM < 1000
+                  ? `${Math.round(distanceToMergeM)} m`
+                  : `${(distanceToMergeM / 1000).toFixed(1)} km`
+                : "Joining…"}
+            </Text>
           </View>
         )}
         <Text style={[styles.speedLabel, { color: colors.mutedForeground }]}>
@@ -167,11 +209,60 @@ export default function ConvoyFormation({
   onVehicleTap,
   isLeader,
   onLeaderHandoff,
+  isJoining,
+  distanceToMergeM,
+  myVehicleId,
+  vehicleRegroupEtas,
 }: ConvoyFormationProps) {
   const colors = useColors();
   const sorted = [...vehicles].sort((a, _b) => (a.isLeader ? -1 : 1));
 
   const handleCardTap = (vehicle: Vehicle) => {
+    // If the tapped vehicle is lagging, show distance callout first
+    const isLagging = gapWarnings?.has(vehicle.id) ?? false;
+    if (isLagging) {
+      const leader = vehicles.find((v) => v.isLeader);
+      const distM = leader
+        ? haversineMeters(
+            vehicle.location.latitude, vehicle.location.longitude,
+            leader.location.latitude, leader.location.longitude,
+          )
+        : null;
+      const distLabel =
+        distM != null
+          ? distM < 1000
+            ? `${Math.round(distM)} m behind the leader`
+            : `${(distM / 1000).toFixed(1)} km behind the leader`
+          : "falling behind the leader";
+
+      if (isLeader && onLeaderHandoff) {
+        Alert.alert(vehicle.name, distLabel, [
+          { text: "Talk Privately", onPress: () => onVehicleTap?.(vehicle) },
+          {
+            text: "Make Lead",
+            onPress: () =>
+              Alert.alert(
+                "Transfer Leadership",
+                `Hand off to ${vehicle.name}? You will become a regular member.`,
+                [
+                  { text: "Cancel", style: "cancel" },
+                  { text: "Transfer", style: "destructive", onPress: () => onLeaderHandoff(vehicle) },
+                ],
+              ),
+          },
+          { text: "Cancel", style: "cancel" },
+        ]);
+      } else {
+        Alert.alert(vehicle.name, distLabel, [
+          onVehicleTap
+            ? { text: "Talk Privately", onPress: () => onVehicleTap(vehicle) }
+            : { text: "OK" },
+          { text: "Dismiss", style: "cancel" },
+        ]);
+      }
+      return;
+    }
+
     if (isLeader && onLeaderHandoff) {
       // Leader gets an action sheet: talk privately OR hand off leadership
       Alert.alert(
@@ -231,6 +322,9 @@ export default function ConvoyFormation({
               colors={colors}
               isLagging={gapWarnings?.has(v.id) ?? false}
               isTalkingTo={!!(talkingToVehicleId && talkingToVehicleId === v.id)}
+              isJoining={isJoining && (v.isMe || v.id === myVehicleId)}
+              distanceToMergeM={isJoining && (v.isMe || v.id === myVehicleId) ? distanceToMergeM : undefined}
+              regroupEta={vehicleRegroupEtas?.get(v.id)}
               onTap={(onVehicleTap || (isLeader && onLeaderHandoff)) && !v.isMe
                 ? () => handleCardTap(v)
                 : undefined}
@@ -351,6 +445,25 @@ const styles = StyleSheet.create({
     fontSize: 9,
     fontWeight: "700",
     color: "#ef4444",
+  },
+  joiningBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  joiningText: {
+    fontSize: 9,
+    fontWeight: "700",
+  },
+  regroupEtaBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  regroupEtaText: {
+    fontSize: 9,
+    fontWeight: "700",
+    fontFamily: "Inter_700Bold",
   },
   tapHint: {
     position: "absolute",

@@ -1,9 +1,11 @@
 /**
- * DestinationPicker — Address search + route fetch modal.
+ * DestinationPicker — Inline map overlay (no modal).
  *
- * Leader types an address → Google Places Text Search geocodes it →
- * Google Directions API fetches the encoded polyline + turn steps →
- * startNavigation() broadcasts the full route + steps to all convoy members.
+ * Renders directly over the map so the user never leaves the map screen:
+ *   • Search bar slides in at the top (below safe-area)
+ *   • Results drop down below the bar
+ *   • Compact route card appears at the bottom once a place is selected
+ *   • One "Go" tap starts convoy navigation for everyone
  */
 
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -11,16 +13,18 @@ import * as Haptics from "expo-haptics";
 import React, { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
+  Animated,
   FlatList,
   KeyboardAvoidingView,
-  Modal,
   Platform,
+  Pressable,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { useConvoy } from "@/context/ConvoyContext";
 import { useColors } from "@/hooks/useColors";
@@ -41,6 +45,7 @@ interface Props {
 
 export default function DestinationPicker({ visible, onClose }: Props) {
   const colors = useColors();
+  const insets = useSafeAreaInsets();
   const { myVehicle, startNavigation } = useConvoy();
 
   const [query, setQuery] = useState("");
@@ -51,15 +56,33 @@ export default function DestinationPicker({ visible, onClose }: Props) {
   const [fetching, setFetching] = useState(false);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const slideAnim = useRef(new Animated.Value(0)).current;
+  const inputRef = useRef<TextInput>(null);
 
   useEffect(() => {
-    if (!visible) {
+    if (visible) {
+      Animated.spring(slideAnim, {
+        toValue: 1,
+        useNativeDriver: true,
+        tension: 80,
+        friction: 12,
+      }).start(() => {
+        setTimeout(() => inputRef.current?.focus(), 100);
+      });
+    } else {
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 180,
+        useNativeDriver: true,
+      }).start();
       setQuery("");
       setResults([]);
       setSelected(null);
       setRoute(null);
     }
-  }, [visible]);
+  }, [visible, slideAnim]);
+
+  if (!visible) return null;
 
   const handleQueryChange = (text: string) => {
     setQuery(text);
@@ -75,7 +98,7 @@ export default function DestinationPicker({ visible, onClose }: Props) {
       const res = await geocodeAddress(text);
       setResults(res);
       setSearching(false);
-    }, 500);
+    }, 400);
   };
 
   const handleSelect = async (geo: GeoResult) => {
@@ -83,7 +106,6 @@ export default function DestinationPicker({ visible, onClose }: Props) {
     setSelected(geo);
     setResults([]);
     setFetching(true);
-
     const origin = myVehicle?.location ?? { latitude: 37.7749, longitude: -122.4194 };
     const result = await fetchRoute(
       origin.latitude,
@@ -109,6 +131,7 @@ export default function DestinationPicker({ visible, onClose }: Props) {
       currentStepIndex: 0,
       totalDistanceM: route.totalDistanceM,
       totalDurationS: route.totalDurationS,
+      totalDurationInTrafficS: route.totalDurationInTrafficS,
     });
     if (route.steps.length > 0) {
       announceNavStart(route.steps[0].instruction);
@@ -116,77 +139,190 @@ export default function DestinationPicker({ visible, onClose }: Props) {
     onClose();
   };
 
+  const clearQuery = () => {
+    setQuery("");
+    setResults([]);
+    setSelected(null);
+    setRoute(null);
+    inputRef.current?.focus();
+  };
+
+  const translateY = slideAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-120, 0],
+  });
+
   return (
-    <Modal visible={visible} animationType="slide" presentationStyle="pageSheet">
-      <KeyboardAvoidingView
-        style={[styles.root, { backgroundColor: colors.background }]}
-        behavior={Platform.OS === "ios" ? "padding" : "height"}
+    <>
+      {/* ── Backdrop — tapping dismisses search */}
+      <Pressable
+        style={[StyleSheet.absoluteFill, styles.backdrop]}
+        onPress={onClose}
+      />
+
+      {/* ── Search bar + results ── */}
+      <Animated.View
+        style={[
+          styles.searchPanel,
+          { top: insets.top + 8, transform: [{ translateY }] },
+        ]}
+        pointerEvents="box-none"
       >
-        <View style={[styles.header, { borderBottomColor: colors.border }]}>
-          <Text style={[styles.title, { color: colors.foreground }]}>Set Destination</Text>
-          <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-            <Ionicons name="close" size={22} color={colors.foreground} />
+        {/* Search bar row */}
+        <View
+          style={[
+            styles.searchBar,
+            {
+              backgroundColor: colors.card,
+              borderColor: colors.border,
+              ...Platform.select({
+                ios: {
+                  shadowColor: "#000",
+                  shadowOffset: { width: 0, height: 3 },
+                  shadowOpacity: 0.18,
+                  shadowRadius: 10,
+                },
+                android: { elevation: 8 },
+              }),
+            },
+          ]}
+          pointerEvents="box-none"
+        >
+          <TouchableOpacity onPress={onClose} style={styles.backBtn} hitSlop={8}>
+            <Ionicons name="arrow-back" size={22} color={colors.foreground} />
           </TouchableOpacity>
-        </View>
-
-        <View style={styles.searchRow}>
-          <View style={[styles.searchBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
-            <Ionicons name="search" size={18} color={colors.mutedForeground} />
-            <TextInput
-              style={[styles.searchInput, { color: colors.foreground }]}
-              placeholder="Search for a place or address…"
-              placeholderTextColor={colors.mutedForeground}
-              value={query}
-              onChangeText={handleQueryChange}
-              autoFocus
-              returnKeyType="search"
-            />
-            {searching && <ActivityIndicator size="small" color={colors.primary} />}
-            {query.length > 0 && !searching && (
-              <TouchableOpacity onPress={() => { setQuery(""); setResults([]); }}>
-                <Ionicons name="close-circle" size={18} color={colors.mutedForeground} />
-              </TouchableOpacity>
-            )}
-          </View>
-        </View>
-
-        {results.length > 0 && (
-          <FlatList
-            data={results}
-            keyExtractor={(_, i) => String(i)}
-            style={styles.resultList}
-            keyboardShouldPersistTaps="handled"
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                onPress={() => handleSelect(item)}
-                style={[styles.resultItem, { borderBottomColor: colors.border }]}
-              >
-                <Ionicons name="location" size={18} color={colors.primary} style={styles.resultIcon} />
-                <View style={styles.resultText}>
-                  <Text style={[styles.resultName, { color: colors.foreground }]} numberOfLines={1}>
-                    {item.name}
-                  </Text>
-                  <Text style={[styles.resultSub, { color: colors.mutedForeground }]} numberOfLines={1}>
-                    {item.displayName}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            )}
+          <TextInput
+            ref={inputRef}
+            style={[styles.searchInput, { color: colors.foreground }]}
+            placeholder="Search destination…"
+            placeholderTextColor={colors.mutedForeground}
+            value={query}
+            onChangeText={handleQueryChange}
+            returnKeyType="search"
+            clearButtonMode="never"
           />
-        )}
+          {searching && (
+            <ActivityIndicator size="small" color={colors.primary} style={styles.indicator} />
+          )}
+          {query.length > 0 && !searching && (
+            <TouchableOpacity onPress={clearQuery} hitSlop={8} style={styles.clearBtn}>
+              <Ionicons name="close-circle" size={18} color={colors.mutedForeground} />
+            </TouchableOpacity>
+          )}
+          {query.length === 0 && (
+            <Ionicons name="search" size={18} color={colors.mutedForeground} style={styles.indicator} />
+          )}
+        </View>
 
-        {selected && (
-          <View style={[styles.routeCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+        {/* Dropdown results */}
+        {results.length > 0 && (
+          <View
+            style={[
+              styles.resultsCard,
+              {
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+                ...Platform.select({
+                  ios: {
+                    shadowColor: "#000",
+                    shadowOffset: { width: 0, height: 4 },
+                    shadowOpacity: 0.15,
+                    shadowRadius: 12,
+                  },
+                  android: { elevation: 8 },
+                }),
+              },
+            ]}
+          >
+            <FlatList
+              data={results}
+              keyExtractor={(_, i) => String(i)}
+              keyboardShouldPersistTaps="handled"
+              scrollEnabled={results.length > 4}
+              style={{ maxHeight: 280 }}
+              renderItem={({ item, index }) => (
+                <TouchableOpacity
+                  onPress={() => handleSelect(item)}
+                  style={[
+                    styles.resultRow,
+                    index < results.length - 1 && {
+                      borderBottomWidth: StyleSheet.hairlineWidth,
+                      borderBottomColor: colors.border,
+                    },
+                  ]}
+                >
+                  <View style={[styles.resultIcon, { backgroundColor: colors.primary + "18" }]}>
+                    <Ionicons name="location" size={16} color={colors.primary} />
+                  </View>
+                  <View style={styles.resultText}>
+                    <Text
+                      style={[styles.resultName, { color: colors.foreground }]}
+                      numberOfLines={1}
+                    >
+                      {item.name}
+                    </Text>
+                    {item.displayName !== item.name && (
+                      <Text
+                        style={[styles.resultSub, { color: colors.mutedForeground }]}
+                        numberOfLines={1}
+                      >
+                        {item.displayName}
+                      </Text>
+                    )}
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color={colors.mutedForeground} />
+                </TouchableOpacity>
+              )}
+            />
+          </View>
+        )}
+      </Animated.View>
+
+      {/* ── Route card at bottom (once a destination is selected) */}
+      {selected && (
+        <KeyboardAvoidingView
+          behavior={Platform.OS === "ios" ? "position" : undefined}
+          style={styles.routeCardOuter}
+          pointerEvents="box-none"
+        >
+          <View
+            style={[
+              styles.routeCard,
+              {
+                bottom: insets.bottom + 90,
+                backgroundColor: colors.card,
+                borderColor: colors.border,
+                ...Platform.select({
+                  ios: {
+                    shadowColor: "#000",
+                    shadowOffset: { width: 0, height: -2 },
+                    shadowOpacity: 0.14,
+                    shadowRadius: 12,
+                  },
+                  android: { elevation: 10 },
+                }),
+              },
+            ]}
+          >
+            {/* Destination row */}
             <View style={styles.destRow}>
-              <MaterialCommunityIcons name="flag-checkered" size={20} color={colors.primary} />
-              <Text style={[styles.destName, { color: colors.foreground }]} numberOfLines={2}>
+              <View style={[styles.destIconWrap, { backgroundColor: colors.primary + "18" }]}>
+                <MaterialCommunityIcons name="flag-checkered" size={16} color={colors.primary} />
+              </View>
+              <Text
+                style={[styles.destName, { color: colors.foreground }]}
+                numberOfLines={2}
+              >
                 {selected.name}
               </Text>
+              <TouchableOpacity onPress={clearQuery} hitSlop={8}>
+                <Ionicons name="close" size={18} color={colors.mutedForeground} />
+              </TouchableOpacity>
             </View>
 
             {fetching && (
               <View style={styles.fetchingRow}>
-                <ActivityIndicator color={colors.primary} />
+                <ActivityIndicator size="small" color={colors.primary} />
                 <Text style={[styles.fetchingText, { color: colors.mutedForeground }]}>
                   Calculating route…
                 </Text>
@@ -195,21 +331,21 @@ export default function DestinationPicker({ visible, onClose }: Props) {
 
             {route && !fetching && (
               <>
-                <View style={styles.routeStats}>
-                  <View style={[styles.statChip, { backgroundColor: colors.primary + "18" }]}>
-                    <MaterialCommunityIcons name="map-marker-distance" size={14} color={colors.primary} />
+                <View style={styles.statsRow}>
+                  <View style={[styles.statChip, { backgroundColor: colors.primary + "15" }]}>
+                    <MaterialCommunityIcons name="map-marker-distance" size={13} color={colors.primary} />
                     <Text style={[styles.statText, { color: colors.primary }]}>
                       {formatDistance(route.totalDistanceM)}
                     </Text>
                   </View>
-                  <View style={[styles.statChip, { backgroundColor: colors.accent + "18" }]}>
-                    <MaterialCommunityIcons name="clock-outline" size={14} color={colors.accent} />
+                  <View style={[styles.statChip, { backgroundColor: colors.accent + "15" }]}>
+                    <MaterialCommunityIcons name="clock-outline" size={13} color={colors.accent} />
                     <Text style={[styles.statText, { color: colors.accent }]}>
                       {formatETA(route.totalDurationS)}
                     </Text>
                   </View>
-                  <View style={[styles.statChip, { backgroundColor: colors.card }]}>
-                    <MaterialCommunityIcons name="sign-direction" size={14} color={colors.mutedForeground} />
+                  <View style={[styles.statChip, { backgroundColor: colors.muted }]}>
+                    <MaterialCommunityIcons name="sign-direction" size={13} color={colors.mutedForeground} />
                     <Text style={[styles.statText, { color: colors.mutedForeground }]}>
                       {route.steps.length} turns
                     </Text>
@@ -217,11 +353,12 @@ export default function DestinationPicker({ visible, onClose }: Props) {
                 </View>
 
                 <TouchableOpacity
-                  style={[styles.startBtn, { backgroundColor: colors.primary }]}
+                  style={[styles.goBtn, { backgroundColor: colors.primary }]}
                   onPress={handleStart}
+                  activeOpacity={0.85}
                 >
                   <MaterialCommunityIcons name="navigation" size={18} color="#fff" />
-                  <Text style={styles.startBtnText}>Start Navigation for All Cars</Text>
+                  <Text style={styles.goBtnText}>Go — Start for All Cars</Text>
                 </TouchableOpacity>
               </>
             )}
@@ -232,121 +369,149 @@ export default function DestinationPicker({ visible, onClose }: Props) {
               </Text>
             )}
           </View>
-        )}
-
-        {!selected && results.length === 0 && query.length === 0 && (
-          <View style={styles.emptyHint}>
-            <MaterialCommunityIcons name="map-search" size={48} color={colors.mutedForeground + "60"} />
-            <Text style={[styles.hintTitle, { color: colors.mutedForeground }]}>
-              Where is the convoy heading?
-            </Text>
-            <Text style={[styles.hintSub, { color: colors.mutedForeground + "99" }]}>
-              Search for a destination and the route will sync to everyone in the convoy.
-            </Text>
-          </View>
-        )}
-      </KeyboardAvoidingView>
-    </Modal>
+        </KeyboardAvoidingView>
+      )}
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
+  backdrop: {
+    zIndex: 40,
+    backgroundColor: "rgba(0,0,0,0.28)",
   },
-  header: {
+
+  searchPanel: {
+    position: "absolute",
+    left: 12,
+    right: 12,
+    zIndex: 41,
+    gap: 6,
+  },
+
+  searchBar: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
-  },
-  title: {
-    fontSize: 20,
-    fontWeight: "700",
-    fontFamily: "Inter_700Bold",
-  },
-  closeBtn: {
-    padding: 4,
-  },
-  searchRow: {
-    padding: 16,
-  },
-  searchBox: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
     paddingHorizontal: 14,
     paddingVertical: 12,
-    borderRadius: 14,
-    borderWidth: 1,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 15,
-    fontFamily: "Inter_400Regular",
-  },
-  resultList: {
-    flex: 1,
-    paddingHorizontal: 16,
-  },
-  resultItem: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    paddingVertical: 12,
-    borderBottomWidth: 1,
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
     gap: 10,
   },
-  resultIcon: {
-    marginTop: 2,
+
+  backBtn: {
+    padding: 2,
   },
+
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    fontFamily: "Inter_400Regular",
+  },
+
+  indicator: {
+    marginLeft: 2,
+  },
+
+  clearBtn: {
+    padding: 2,
+  },
+
+  resultsCard: {
+    borderRadius: 16,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: "hidden",
+  },
+
+  resultRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    gap: 12,
+  },
+
+  resultIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
   resultText: {
     flex: 1,
     gap: 2,
   },
+
   resultName: {
     fontSize: 14,
     fontWeight: "600",
     fontFamily: "Inter_600SemiBold",
   },
+
   resultSub: {
     fontSize: 12,
     fontFamily: "Inter_400Regular",
   },
+
+  routeCardOuter: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 41,
+    pointerEvents: "box-none",
+  },
+
   routeCard: {
-    margin: 16,
+    position: "absolute",
+    left: 12,
+    right: 12,
+    borderRadius: 20,
+    borderWidth: StyleSheet.hairlineWidth,
     padding: 16,
-    borderRadius: 16,
-    borderWidth: 1,
     gap: 12,
   },
+
   destRow: {
     flexDirection: "row",
-    alignItems: "flex-start",
+    alignItems: "center",
     gap: 10,
   },
+
+  destIconWrap: {
+    width: 30,
+    height: 30,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
   destName: {
     flex: 1,
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: "700",
     fontFamily: "Inter_700Bold",
   },
+
   fetchingRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 10,
   },
+
   fetchingText: {
     fontSize: 14,
     fontFamily: "Inter_400Regular",
   },
-  routeStats: {
+
+  statsRow: {
     flexDirection: "row",
     gap: 8,
     flexWrap: "wrap",
   },
+
   statChip: {
     flexDirection: "row",
     alignItems: "center",
@@ -355,47 +520,32 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 10,
   },
+
   statText: {
     fontSize: 13,
     fontWeight: "600",
     fontFamily: "Inter_600SemiBold",
   },
-  startBtn: {
+
+  goBtn: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    height: 52,
+    height: 50,
     borderRadius: 14,
   },
-  startBtnText: {
+
+  goBtnText: {
     color: "#fff",
     fontSize: 15,
     fontWeight: "700",
     fontFamily: "Inter_700Bold",
   },
+
   noRoute: {
     fontSize: 13,
     fontFamily: "Inter_400Regular",
     textAlign: "center",
-  },
-  emptyHint: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    padding: 32,
-    gap: 12,
-  },
-  hintTitle: {
-    fontSize: 17,
-    fontWeight: "600",
-    fontFamily: "Inter_600SemiBold",
-    textAlign: "center",
-  },
-  hintSub: {
-    fontSize: 14,
-    fontFamily: "Inter_400Regular",
-    textAlign: "center",
-    lineHeight: 20,
   },
 });

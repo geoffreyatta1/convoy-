@@ -20,7 +20,7 @@
  *    DeviceEventEmitter to the map view (ConvoyMap subscribes and animates camera)
  */
 
-import { DeviceEventEmitter, Platform } from "react-native";
+import { DeviceEventEmitter, Linking, Platform } from "react-native";
 
 export interface CarPlayVehicle {
   id: string;
@@ -47,6 +47,12 @@ export interface CarPlayState {
   upcomingSteps?: Array<{ instruction: string; distanceM: number; icon: string }>;
   /** Vehicles that have exceeded the gap threshold, with their distance to the leader. */
   gapWarningVehicles?: Array<{ id: string; name: string; distanceM: number }>;
+  /** True when all vehicles are within gap threshold (≥2 cars, no active merge). */
+  isInFormation?: boolean;
+  /** Straight-line distance from follower to merge point while joining (metres). */
+  distanceToMergeM?: number;
+  /** Active regroup pin broadcast by a convoy member, if any. */
+  regroupPin?: { name: string; lat: number; lng: number };
 }
 
 // ─── Maneuver icon assets ─────────────────────────────────────────────────────
@@ -131,6 +137,12 @@ let gapAlertShowing = false;
 let activeVoiceTemplate: any = null;
 /** True while panning mode is active on the MapTemplate. */
 let isPanningActive = false;
+/**
+ * Composite key for the regroup pin most recently surfaced via showTripPreviews.
+ * Set to "<lat>,<lng>" when shown; null when hidden. Prevents redundant
+ * showTripPreviews calls on every GPS state tick.
+ */
+let lastShownRegroupPinId: string | null = null;
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
@@ -189,7 +201,29 @@ function handleMapButton({ id }: { id: string }) {
       try { activeMapTemplate.showPanningInterface(true); } catch {}
       isPanningActive = true;
     }
+  } else if (id === "regroup") {
+    navigateToRegroupPin(currentState);
   }
+}
+
+/**
+ * Launch turn-by-turn navigation to the active regroup pin.
+ *
+ * Opens Apple Maps via URL scheme with the regroup pin coordinates and name.
+ * This hands off to the system Maps app for routing, which CarPlay renders
+ * natively on the in-car display — the same behaviour drivers get when tapping
+ * "Navigate Here" on the phone map.
+ */
+function navigateToRegroupPin(state: CarPlayState): void {
+  const pin = state.regroupPin;
+  if (!pin) return;
+  const label = encodeURIComponent(pin.name);
+  const url = `maps://?daddr=${pin.lat},${pin.lng}&q=${label}&dirflg=d`;
+  Linking.openURL(url).catch(() => {
+    // Fallback: open via Google Maps universal URL if Maps scheme is unavailable
+    const fallback = `https://maps.apple.com/?daddr=${pin.lat},${pin.lng}&q=${label}&dirflg=d`;
+    Linking.openURL(fallback).catch(() => {});
+  });
 }
 
 /**
@@ -208,19 +242,56 @@ function handleNavigationCancelled() {
 
 /** Returns the map template config object for the current state. */
 function mapTemplateConfig(state: CarPlayState): object {
+  // Formation / joining status surfaces through the non-interactive template
+  // title area (CPMapTemplate.title), not via a bar button. This is the only
+  // strictly read-only text field on CPMapTemplate and therefore the correct
+  // channel per CarPlay HIG for ambient contextual information.
+  //
+  // Priority:
+  //   1. Joining distance ("2.4 km to convoy") — most critical, replaces name
+  //   2. In-formation confirmation ("In formation") — brief positive state
+  //   3. Convoy name (default)
+  const templateTitle =
+    state.distanceToMergeM != null
+      ? `${formatDistanceM(state.distanceToMergeM)} to convoy`
+      : state.isInFormation
+      ? "In formation"
+      : state.convoyName;
+
   return {
-    title: state.convoyName,
-    leadingNavigationBarButtons: [{ id: "code", title: state.code }],
-    trailingNavigationBarButtons: [talkButton(state.isTalking)],
-    // Two map buttons: convoy list + pan mode toggle (max 4 allowed by iOS).
-    // The pan button satisfies the Feb 2026 guide requirement for all navigation
-    // apps to provide a panning control on knob/touchpad CarPlay vehicles.
-    mapButtons: [
-      { id: "list", systemIcon: "list.bullet" },
-      { id: "pan",  systemIcon: "hand.draw"   },
+    title: templateTitle,
+    leadingNavigationBarButtons: [
+      { id: "code", title: state.code },
     ],
+    trailingNavigationBarButtons: [talkButton(state.isTalking)],
+    // iOS caps CPMapButton arrays at 4 items. Buttons are listed here in
+    // descending priority so that any future additions (append to the array)
+    // never silently push off safety-critical controls.
+    //
+    // Priority order:
+    //   1. Regroup  — safety-critical; only shown when a regroup pin is active
+    //   2. Pan      — required by Feb 2026 CarPlay Guide for knob/touchpad vehicles
+    //   3. List     — convoy vehicle list (convenience)
+    //   4+. future  — new buttons go here; they are dropped before Regroup/Pan
+    //
+    // The slice(0, 4) cap guard ensures iOS never receives more than 4 buttons
+    // regardless of how many entries are added below.
+    mapButtons: ([
+      ...(state.regroupPin ? [{ id: "regroup", systemIcon: "flag.fill"    }] : []),
+      { id: "pan",  systemIcon: "hand.draw"    },
+      { id: "list", systemIcon: "list.bullet"  },
+      // ← add future map buttons here; they are automatically capped
+    ] as object[]).slice(0, 4),
     onBarButtonPressed: handleBarButton,
     onMapButtonPressed: handleMapButton,
+    // Fired when the driver taps "Navigate" on the regroup trip preview card.
+    // Opens Apple Maps (same as the flag map-button) for turn-by-turn routing.
+    onStartTrip: () => {
+      if (currentState?.regroupPin) navigateToRegroupPin(currentState);
+    },
+    onSelectedTrip: () => {
+      if (currentState?.regroupPin) navigateToRegroupPin(currentState);
+    },
     onPanBeganWithDirection: ({ direction }: { direction: string }) => {
       DeviceEventEmitter.emit("CARPLAY_PAN_DIRECTION", { direction });
     },
@@ -251,6 +322,7 @@ function ensureMapTemplate(state: CarPlayState) {
   }
 
   syncNavSession(state);
+  syncRegroupAnnotation(state);
 }
 
 // ─── ListTemplate builder ─────────────────────────────────────────────────────
@@ -505,6 +577,50 @@ function syncNavSession(state: CarPlayState): void {
   }
 }
 
+// ─── Regroup pin annotation ───────────────────────────────────────────────────
+
+/**
+ * Show / hide the regroup pin as a destination annotation on the CarPlay map.
+ *
+ * Uses CPMapTemplate.showTripPreviews() which is the standard iOS CarPlay
+ * channel for surfacing a point of interest before navigation begins. It draws
+ * a destination pin at the regroup coordinates and shows a compact card at the
+ * bottom of the car display with the pin name and a "Navigate" button. The
+ * callback wired to "Navigate" calls navigateToRegroupPin(), mirroring the
+ * existing flag map-button behaviour.
+ *
+ * The preview is hidden while an active convoy navigation session is running
+ * (state.currentStep set), since the navigation UI already occupies the map.
+ * Calls are debounced via lastShownRegroupPinId to avoid a showTripPreviews
+ * call on every GPS tick.
+ */
+function syncRegroupAnnotation(state: CarPlayState): void {
+  if (!activeMapTemplate || !Trip) return;
+
+  const pin = state.regroupPin;
+  const isNavigating = !!state.currentStep;
+
+  if (pin && !isNavigating) {
+    const pinId = `${pin.lat.toFixed(6)},${pin.lng.toFixed(6)}`;
+    if (pinId === lastShownRegroupPinId) return; // already showing this pin
+    lastShownRegroupPinId = pinId;
+    try {
+      const trip = new Trip({
+        origin: { latitude: 0, longitude: 0, name: "" },
+        destination: { latitude: pin.lat, longitude: pin.lng, name: pin.name },
+        routeChoices: [],
+      });
+      activeMapTemplate.showTripPreviews([trip], {
+        startButtonTitle: "Navigate",
+        additionalRoutesButtonTitle: "",
+      });
+    } catch {}
+  } else if (lastShownRegroupPinId !== null) {
+    lastShownRegroupPinId = null;
+    try { activeMapTemplate.hideTripPreviews(); } catch {}
+  }
+}
+
 // ─── Gap alert management ─────────────────────────────────────────────────────
 
 /**
@@ -591,6 +707,7 @@ export function clearCarPlayUI(): void {
   activeMapTemplate = null;
   gapAlertShowing = false;
   isPanningActive = false;
+  lastShownRegroupPinId = null;
 
   showIdleTemplate();
 }
@@ -615,8 +732,6 @@ function subscribeMultitouchEvents(): (() => void) | null {
 
     // iOS 26 multitouch (CarPlay Ultra) — emitted via withCarPlayMultitouchPatch
     // vendor patch; no-op on earlier OS versions where events are never emitted.
-    // Wrapped in try/catch so unsupported events do not throw when the patch
-    // plugin is disabled (e.g. CarPlay entitlement not yet granted).
     let pinchSub: any, pitchSub: any, rotateSub: any;
     try {
       pinchSub = emitter.addListener?.("pinchZoom" as any, (e: { scale: number }) => {
@@ -666,6 +781,7 @@ export function initCarPlay() {
       activeNavSession = null;
       lastNavStepKey = null;
       activeVoiceTemplate = null;
+      lastShownRegroupPinId = null;
 
       if (currentState) {
         ensureMapTemplate(currentState);
@@ -683,6 +799,7 @@ export function initCarPlay() {
       gapAlertShowing = false;
       isPanningActive = false;
       activeVoiceTemplate = null;
+      lastShownRegroupPinId = null;
     });
   } catch {}
 }

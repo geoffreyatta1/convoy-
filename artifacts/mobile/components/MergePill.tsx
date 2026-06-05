@@ -19,13 +19,28 @@ const AVG_SPEED_MPS = 11.2; // ~25 mph average for city/suburb driving
 
 export default function MergePill() {
   const colors = useColors();
-  const { mergeState, session } = useConvoy();
+  const { mergeState, session, regroupPin, myVehicle } = useConvoy();
   const [showSynced, setShowSynced] = useState(false);
   const slideY = useRef(new Animated.Value(40)).current;
   const opacity = useRef(new Animated.Value(0)).current;
   const prevOnRoute = useRef(false);
 
   const nav = session?.navigation;
+  const isRegroupNav = nav?.navSource === "regroup" && !!regroupPin;
+
+  // Compute distance to regroup pin when navigating to it
+  const regroupDistanceM =
+    isRegroupNav && myVehicle
+      ? Math.sqrt(
+          Math.pow((myVehicle.location.latitude - regroupPin!.lat) * 111_139, 2) +
+          Math.pow(
+            (myVehicle.location.longitude - regroupPin!.lng) *
+              111_139 *
+              Math.cos((myVehicle.location.latitude * Math.PI) / 180),
+            2,
+          ),
+        )
+      : null;
 
   // Detect the moment the follower joins the convoy route
   useEffect(() => {
@@ -45,7 +60,10 @@ export default function MergePill() {
   // eslint-disable-next-line react-hooks/exhaustive-deps -- mergeState?.onConvoyRoute is the primitive we track; adding full mergeState would fire on distance changes too
   }, [mergeState?.onConvoyRoute]);
 
-  const isVisible = !!(mergeState && (!mergeState.onConvoyRoute || showSynced));
+  const isVisible = !!(
+    (mergeState && (!mergeState.onConvoyRoute || showSynced)) ||
+    isRegroupNav
+  );
 
   useEffect(() => {
     Animated.parallel([
@@ -63,10 +81,16 @@ export default function MergePill() {
     ]).start();
   }, [isVisible, opacity, slideY]);
 
-  if (!nav || !mergeState) return null;
+  if (!nav) return null;
+  if (!mergeState && !isRegroupNav) return null;
 
-  const isSynced = showSynced && mergeState.onConvoyRoute;
-  const etaS = mergeState.distanceToMergeM / AVG_SPEED_MPS;
+  const isSynced = !isRegroupNav && showSynced && !!mergeState?.onConvoyRoute;
+  const etaS = isRegroupNav && regroupDistanceM != null
+    ? regroupDistanceM / AVG_SPEED_MPS
+    : (mergeState ? mergeState.distanceToMergeM / AVG_SPEED_MPS : 0);
+  const distM = isRegroupNav && regroupDistanceM != null
+    ? regroupDistanceM
+    : (mergeState?.distanceToMergeM ?? 0);
 
   return (
     <Animated.View
@@ -96,7 +120,7 @@ export default function MergePill() {
         ]}
       >
         <MaterialCommunityIcons
-          name={isSynced ? "check-decagram" : "call-merge"}
+          name={isSynced ? "check-decagram" : isRegroupNav ? "flag-checkered" : "call-merge"}
           size={16}
           color={isSynced ? "#fff" : colors.warning}
         />
@@ -109,15 +133,20 @@ export default function MergePill() {
       ) : (
         <View style={styles.textRow}>
           <Text style={[styles.label, { color: colors.foreground }]}>
-            In sync in{" "}
+            {isRegroupNav ? "Regroup in " : "In sync in "}
           </Text>
           <Text style={[styles.value, { color: colors.warning }]}>
             {formatETA(etaS)}
           </Text>
           <Text style={[styles.sep, { color: colors.mutedForeground }]}> · </Text>
           <Text style={[styles.value, { color: colors.warning }]}>
-            {formatDistance(mergeState.distanceToMergeM)}
+            {formatDistance(distM)}
           </Text>
+          {isRegroupNav && (
+            <Text style={[styles.label, { color: colors.mutedForeground }]}>
+              {" "}to regroup
+            </Text>
+          )}
         </View>
       )}
     </Animated.View>

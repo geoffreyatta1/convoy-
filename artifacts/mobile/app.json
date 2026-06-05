@@ -3,7 +3,7 @@
     "name": "Family Convoy Navigator",
     "slug": "convoy",
     "version": "1.0.0",
-    "orientation": "portrait",
+    "orientation": "default",
     "icon": "./assets/images/icon.png",
     "scheme": [
       "convoy"
@@ -23,6 +23,9 @@
         "audio",
         "location"
       ],
+      "config": {
+        "googleMapsApiKey": "$(GOOGLE_API_KEY)"
+      },
       "infoPlist": {
         "NSLocationWhenInUseUsageDescription": "Convoy needs your location to show your position to other convoy members.",
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Convoy needs your location in the background so other convoy members can always see where you are.",
@@ -32,9 +35,6 @@
           "location"
         ],
         "ITSAppUsesNonExemptEncryption": false
-      },
-      "config": {
-        "googleMapsApiKey": "AIzaSyB2PrKbDG9D5q10k54ipEF9nb6sUsZWj4k"
       }
     },
     "android": {
@@ -47,18 +47,12 @@
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_MICROPHONE",
         "FOREGROUND_SERVICE_MEDIA_PLAYBACK"
-      ],
-      "config": {
-        "googleMaps": {
-          "apiKey": "AIzaSyB2PrKbDG9D5q10k54ipEF9nb6sUsZWj4k"
-        }
-      }
+      ]
     },
     "web": {
       "favicon": "./assets/images/icon.png"
     },
     "plugins": [
-      "react-native-maps",
       [
         "expo-router",
         {
@@ -69,6 +63,7 @@
       "expo-web-browser",
       "expo-location",
       "./plugins/withConvoyAudio",
+      "./plugins/withGoogleMapsIOS",
       [
         "expo-build-properties",
         {

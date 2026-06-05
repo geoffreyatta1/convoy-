@@ -18,7 +18,13 @@ router.get("/stripe/products", async (_req, res): Promise<void> => {
       metadata: Record<string, string> | null; prices: unknown[];
     }>();
 
-    for (const row of rows as any[]) {
+    type ProductRow = {
+      product_id: string; product_name: string;
+      product_description: string | null; product_metadata: Record<string, string> | null;
+      price_id: string | null; unit_amount: number | null;
+      currency: string | null; recurring: unknown;
+    };
+    for (const row of rows as ProductRow[]) {
       if (!productsMap.has(row.product_id)) {
         productsMap.set(row.product_id, {
           id: row.product_id,

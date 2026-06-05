@@ -2,7 +2,7 @@ import { MaterialCommunityIcons } from "@expo/vector-icons";
 import React, { useState } from "react";
 import { Modal, StyleSheet, Text, TouchableOpacity, TouchableWithoutFeedback, View } from "react-native";
 
-import { NavigationState, Vehicle } from "@/context/ConvoyContext";
+import { MergeState, NavigationState, Vehicle } from "@/context/ConvoyContext";
 import { useColors } from "@/hooks/useColors";
 import ConvoyMap from "./ConvoyMap.web";
 
@@ -10,6 +10,7 @@ interface MiniMapViewProps {
   vehicles: Vehicle[];
   navigation: NavigationState;
   gapWarnings?: Set<string>;
+  mergeState?: MergeState | null;
 }
 
 function fmtMi(m: number): string {
@@ -31,7 +32,7 @@ const MINI_W = 148;
 const MINI_H = 120;
 const SCALE = MINI_W / NATURAL_W;
 
-export default function MiniMapView({ vehicles, navigation, gapWarnings }: MiniMapViewProps) {
+export default function MiniMapView({ vehicles, navigation, gapWarnings, mergeState }: MiniMapViewProps) {
   const colors = useColors();
   const [expanded, setExpanded] = useState(false);
 
@@ -70,6 +71,23 @@ export default function MiniMapView({ vehicles, navigation, gapWarnings }: MiniM
             />
           </View>
         </View>
+
+        {/* Joining overlay pill */}
+        {mergeState && !mergeState.onConvoyRoute && (() => {
+          const distM = mergeState.distanceToMergeM;
+          const myVeh = vehicles.find((v) => v.isMe);
+          const speedMs = myVeh?.location.speed ? myVeh.location.speed * 0.44704 : 50 / 3.6;
+          const etaMin = Math.max(1, Math.round(distM / speedMs / 60));
+          const distLabel = distM < 1000 ? `${Math.round(distM)}m` : `${(distM / 1000).toFixed(1)}km`;
+          return (
+            <View style={[styles.joinPill, { backgroundColor: "#f59e0b22", borderColor: "#f59e0b44" }]}>
+              <MaterialCommunityIcons name="map-marker-path" size={9} color="#f59e0b" />
+              <Text style={styles.joinPillText} numberOfLines={1}>
+                {`${distLabel} to convoy · ~${etaMin} min`}
+              </Text>
+            </View>
+          );
+        })()}
 
         {/* Distance/ETA pill */}
         <View style={[styles.pill, { borderTopColor: colors.border }]}>
@@ -151,6 +169,23 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: 0,
     left: 0,
+  },
+  joinPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    marginHorizontal: 6,
+    marginTop: 4,
+  },
+  joinPillText: {
+    fontSize: 9,
+    fontWeight: "700",
+    color: "#f59e0b",
+    flexShrink: 1,
   },
   pill: {
     flexDirection: "row",

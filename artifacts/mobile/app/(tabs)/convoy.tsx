@@ -12,7 +12,6 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   Animated,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -158,28 +157,28 @@ export default function ConvoyTalkScreen() {
     prevRemoteSpeakersRef.current = count;
   }, [remoteSpeakerUids, triggerIncoming]);
 
-  const handlePressIn = useCallback(async () => {
-    const started = await startTalking();
-    if (!started) return;
-    playSound("ptt_start");
-    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    startPulse();
-    Animated.parallel([
-      Animated.spring(scale, { toValue: 0.94, useNativeDriver: true }),
-      Animated.timing(glow, { toValue: 1, duration: 150, useNativeDriver: true }),
-    ]).start();
-  }, [startTalking, glow, scale, startPulse]);
-
-  const handlePressOut = useCallback(() => {
-    playSound("ptt_end");
-    if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    stopTalking();
-    stopPulse();
-    Animated.parallel([
-      Animated.spring(scale, { toValue: 1, useNativeDriver: true }),
-      Animated.timing(glow, { toValue: 0, duration: 200, useNativeDriver: true }),
-    ]).start();
-  }, [stopTalking, glow, scale, stopPulse]);
+  const handleToggle = useCallback(async () => {
+    if (isTalking) {
+      playSound("ptt_end");
+      if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+      stopTalking();
+      stopPulse();
+      Animated.parallel([
+        Animated.spring(scale, { toValue: 1, useNativeDriver: true }),
+        Animated.timing(glow, { toValue: 0, duration: 200, useNativeDriver: true }),
+      ]).start();
+    } else {
+      const started = await startTalking();
+      if (!started) return;
+      playSound("ptt_start");
+      if (Platform.OS !== "web") Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
+      startPulse();
+      Animated.parallel([
+        Animated.spring(scale, { toValue: 0.94, useNativeDriver: true }),
+        Animated.timing(glow, { toValue: 1, duration: 150, useNativeDriver: true }),
+      ]).start();
+    }
+  }, [isTalking, startTalking, stopTalking, glow, scale, startPulse, stopPulse]);
 
   if (!session) {
     return (
@@ -280,7 +279,7 @@ export default function ConvoyTalkScreen() {
             <MaterialCommunityIcons name="microphone-off" size={40} color={colors.mutedForeground + "50"} />
             <Text style={[styles.emptyLogText, { color: colors.mutedForeground }]}>No transmissions yet</Text>
             <Text style={[styles.emptyLogSub, { color: colors.mutedForeground + "80" }]}>
-              Hold the button below to talk to your convoy
+              Tap the button below to talk to your convoy
             </Text>
           </View>
         ) : (
@@ -311,7 +310,7 @@ export default function ConvoyTalkScreen() {
             ? isAgoraAvailable() ? "TRANSMITTING LIVE AUDIO…" : "TRANSMITTING TO ALL CARS…"
             : remoteSpeakerUids.size > 0
             ? "RECEIVING AUDIO…"
-            : "HOLD TO TALK"}
+            : "TAP TO TALK"}
         </Text>
 
         <View style={styles.pttContainer}>
@@ -321,7 +320,7 @@ export default function ConvoyTalkScreen() {
           <Animated.View
             style={[styles.ring, { borderColor: colors.primary, transform: [{ scale: pulseRing }], opacity: pulseOpacity }]}
           />
-          <Pressable onPressIn={handlePressIn} onPressOut={handlePressOut} delayHoverIn={0}>
+          <TouchableOpacity onPress={handleToggle} activeOpacity={0.85}>
             <Animated.View
               style={[styles.pttBtn, { backgroundColor: btnColor, transform: [{ scale }] }, glowStyle]}
             >
@@ -331,7 +330,7 @@ export default function ConvoyTalkScreen() {
                 color="#fff"
               />
             </Animated.View>
-          </Pressable>
+          </TouchableOpacity>
         </View>
 
         <View style={styles.vehicleRow}>

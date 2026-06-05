@@ -12,6 +12,13 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import RAnimated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withSequence,
+  withTiming,
+} from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import AiAssistantButton from "@/components/AiAssistantButton";
@@ -28,7 +35,7 @@ import { StopProposalBanner } from "@/components/StopProposalBanner";
 import { SuggestStopModal } from "@/components/SuggestStopModal";
 import ShareConvoyModal from "@/components/ShareConvoyModal";
 import TalkButton from "@/components/TalkButton";
-import { useConvoy, Vehicle } from "@/context/ConvoyContext";
+import { RegroupPin, useConvoy, Vehicle } from "@/context/ConvoyContext";
 import { HazardType } from "@/services/hazards";
 import { useColors } from "@/hooks/useColors";
 import {
@@ -116,6 +123,8 @@ export default function MapScreen() {
     pendingStopRequest,
     respondToStopRequest,
     regroupPin,
+    clearRegroupPin,
+    vehicleRegroupEtas,
     isInSyncZone,
     convoycentroid,
     clearSyncPTT,
@@ -215,6 +224,81 @@ export default function MapScreen() {
     const t = setTimeout(() => setGapBannerDismissed(true), 4000);
     return () => clearTimeout(t);
   }, [gapWarnings.size]);
+
+  /* ── Gap warning banner: slide-down in / slide-up+fade out on UI thread ── */
+  const gapBannerVisible = gapWarnings.size > 0 && !gapBannerDismissed;
+  const _gapBannerOpacity = useSharedValue(0);
+  const _gapBannerTranslateY = useSharedValue(-44);
+  useEffect(() => {
+    if (gapBannerVisible) {
+      _gapBannerOpacity.value = withTiming(1, { duration: 250, easing: Easing.out(Easing.cubic) });
+      _gapBannerTranslateY.value = withTiming(0, { duration: 250, easing: Easing.out(Easing.cubic) });
+    } else {
+      _gapBannerOpacity.value = withTiming(0, { duration: 200, easing: Easing.in(Easing.cubic) });
+      _gapBannerTranslateY.value = withTiming(-44, { duration: 200, easing: Easing.in(Easing.cubic) });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gapBannerVisible]);
+  const gapBannerAnimStyle = useAnimatedStyle(() => ({
+    opacity: _gapBannerOpacity.value,
+    transform: [{ translateY: _gapBannerTranslateY.value }],
+  }));
+
+  /* ── Formation badge: fade+scale in/out on UI thread ────── */
+  const formationVisible =
+    !!(session && gapWarnings.size === 0 && session.vehicles.length >= 2 && !mergeState);
+  const _formationOpacity = useSharedValue(0);
+  const _formationScale = useSharedValue(0.85);
+  useEffect(() => {
+    if (formationVisible) {
+      _formationOpacity.value = withTiming(1, { duration: 300, easing: Easing.out(Easing.cubic) });
+      _formationScale.value = withTiming(1, { duration: 300, easing: Easing.out(Easing.back(1.2)) });
+    } else {
+      _formationOpacity.value = withTiming(0, { duration: 200, easing: Easing.in(Easing.cubic) });
+      _formationScale.value = withTiming(0.85, { duration: 200, easing: Easing.in(Easing.cubic) });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [formationVisible]);
+  const formationAnimStyle = useAnimatedStyle(() => ({
+    opacity: _formationOpacity.value,
+    transform: [{ scale: _formationScale.value }],
+  }));
+
+  /* ── Car-count badge bump animation ──────────────────────── */
+  // Tracks previous count so we know whether to play a join (scale-pop up)
+  // or leave (scale-shrink) animation when session.vehicles.length changes.
+  const _prevVehicleCount = useRef(session?.vehicles.length ?? 0);
+  const _carCountScale = useSharedValue(1);
+  const _carCountShake = useSharedValue(0);
+  useEffect(() => {
+    const current = session?.vehicles.length ?? 0;
+    const prev = _prevVehicleCount.current;
+    _prevVehicleCount.current = current;
+    if (current === prev) return;
+    if (current > prev) {
+      // Join: scale-pop up → back (draws eye to the new count)
+      _carCountScale.value = withSequence(
+        withTiming(1.3, { duration: 130, easing: Easing.out(Easing.cubic) }),
+        withTiming(1.0, { duration: 170, easing: Easing.out(Easing.back(2)) }),
+      );
+    } else {
+      // Leave: rapid horizontal shake signals the vehicle departure
+      _carCountShake.value = withSequence(
+        withTiming(-4, { duration: 55 }),
+        withTiming( 4, { duration: 55 }),
+        withTiming(-3, { duration: 50 }),
+        withTiming( 3, { duration: 50 }),
+        withTiming( 0, { duration: 65 }),
+      );
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session?.vehicles.length]);
+  const carCountAnimStyle = useAnimatedStyle(() => ({
+    transform: [
+      { scale: _carCountScale.value },
+      { translateX: _carCountShake.value },
+    ],
+  }));
 
   /* ── Auto-dismiss sync banner after 4 s ─────────────────── */
   useEffect(() => {
@@ -345,6 +429,7 @@ export default function MapScreen() {
             currentStepIndex: 0,
             totalDistanceM: result.totalDistanceM,
             totalDurationS: result.totalDurationS,
+            totalDurationInTrafficS: result.totalDurationInTrafficS,
           });
           if (result.steps.length > 0) {
             announceNavStep(result.steps[0].instruction, result.steps[0].distanceM);
@@ -449,6 +534,23 @@ export default function MapScreen() {
     }
   };
 
+  const handleRegroupPinNavigate = useCallback(async (pin: RegroupPin) => {
+    const loc = myVehicle?.location;
+    if (!loc) return;
+    const result = await fetchRoute(loc.latitude, loc.longitude, pin.lat, pin.lng);
+    if (!result) return;
+    startNavigation({
+      steps: result.steps,
+      route: result.route,
+      destination: { name: pin.name, latitude: pin.lat, longitude: pin.lng },
+      totalDistanceM: result.totalDistanceM,
+      totalDurationS: result.totalDurationS,
+      totalDurationInTrafficS: result.totalDurationS,
+      currentStepIndex: 0,
+      navSource: "regroup",
+    });
+  }, [myVehicle, startNavigation]);
+
   const handleVehicleTap = async (vehicle: Vehicle) => {
     if (Platform.OS === "web") return;
     if (vehicle.isMe) return;
@@ -535,7 +637,14 @@ export default function MapScreen() {
   // Stats for the navigating bottom sheet
   const stepsLeft = nav ? nav.steps.slice(nav.currentStepIndex) : [];
   const remDistM = stepsLeft.reduce((s, st) => s + st.distanceM, 0);
-  const remDurS = stepsLeft.reduce((s, st) => s + st.durationS, 0);
+  // Scale remaining step-duration by the traffic factor so the ETA and
+  // "min" display reflects real-world traffic, not free-flow times.
+  const rawRemDurS = stepsLeft.reduce((s, st) => s + st.durationS, 0);
+  const trafficFactor =
+    nav && nav.totalDurationS > 0
+      ? nav.totalDurationInTrafficS / nav.totalDurationS
+      : 1;
+  const remDurS = Math.round(rawRemDurS * trafficFactor);
 
   return (
     <View style={[styles.root, { backgroundColor: colors.background }]}>
@@ -564,6 +673,8 @@ export default function MapScreen() {
           activeSyncTargetId={isTalking ? talkTarget?.id : null}
           activeSyncCallerId={isTalking && myVehicle ? myVehicle.id : null}
           onMapPress={isNavigating ? showBannersTemporarily : undefined}
+          onRegroupPinNavigate={handleRegroupPinNavigate}
+          onRegroupPinClear={clearRegroupPin}
         />
 
         {/* ── Sync zone: pulsing green edge glow (map-scoped) ── */}
@@ -620,100 +731,114 @@ export default function MapScreen() {
             <Text style={[styles.carPlayText, { color: colors.success }]}>CarPlay</Text>
           </View>
         )}
-        <View style={[styles.carCountBadge, { backgroundColor: colors.primary + "22" }]}>
+        <RAnimated.View style={[styles.carCountBadge, { backgroundColor: colors.primary + "22" }, carCountAnimStyle]}>
           <MaterialCommunityIcons name="car" size={12} color={colors.primary} />
           <Text style={[styles.carCountText, { color: colors.primary }]}>
             {session.vehicles.length}
           </Text>
-        </View>
+        </RAnimated.View>
+        {/* Always mounted so the exit animation can play; opacity driven by Reanimated */}
+        <RAnimated.View
+          style={[styles.formationBadge, { backgroundColor: "#22c55e22" }, formationAnimStyle]}
+          pointerEvents="none"
+        >
+          <View style={[styles.formationDot, { backgroundColor: "#22c55e" }]} />
+          <Text style={[styles.formationText, { color: "#22c55e" }]}>In formation</Text>
+        </RAnimated.View>
       </View>
 
       {/* ── Right sidebar floating buttons ──────────────── */}
       <View style={[styles.rightSidebar, { top: floatTop }]}>
-        {/* 2D map mode indicator */}
-        <View style={[styles.sideBtn, { backgroundColor: colors.card, borderColor: colors.border }]}>
-          <Text style={[styles.sideBtnLabel, { color: colors.foreground }]}>2D</Text>
+        {/* All buttons grouped in a single card so they align perfectly */}
+        <View style={[styles.sideCard, { backgroundColor: colors.card, borderColor: colors.border }]}>
+          {/* 2D map mode indicator */}
+          <View style={styles.sidePill}>
+            <Text style={[styles.sideBtnLabel, { color: colors.foreground }]}>2D</Text>
+          </View>
+
+          <View style={[styles.sideDivider, { backgroundColor: colors.border }]} />
+
+          <TouchableOpacity
+            onPress={() => {
+              if (Platform.OS !== "web") Haptics.selectionAsync();
+              setShowShare(true);
+            }}
+            style={styles.sidePill}
+          >
+            <MaterialCommunityIcons name="share-variant" size={18} color={colors.foreground} />
+          </TouchableOpacity>
+
+          <View style={[styles.sideDivider, { backgroundColor: colors.border }]} />
+
+          <TouchableOpacity
+            onPress={() => {
+              if (Platform.OS !== "web") Haptics.selectionAsync();
+              setShowHazardPicker(true);
+            }}
+            style={styles.sidePill}
+          >
+            <MaterialCommunityIcons name="shield-alert" size={18} color={colors.foreground} />
+          </TouchableOpacity>
+
+          <View style={[styles.sideDivider, { backgroundColor: colors.border }]} />
+
+          {/* AI voice assistant mic */}
+          <AiAssistantButton onHazardDetected={handleVoiceHazard} inCard />
+
+          <View style={[styles.sideDivider, { backgroundColor: colors.border }]} />
+
+          <TouchableOpacity
+            onPress={() => {
+              if (Platform.OS !== "web") Haptics.selectionAsync();
+              setShowRegroup(true);
+            }}
+            style={[
+              styles.sidePill,
+              gapWarnings.size > 0 && { backgroundColor: colors.warning + "22" },
+            ]}
+          >
+            <MaterialCommunityIcons
+              name="gas-station"
+              size={18}
+              color={gapWarnings.size > 0 ? colors.warning : colors.foreground}
+            />
+          </TouchableOpacity>
+
+          <View style={[styles.sideDivider, { backgroundColor: colors.border }]} />
+
+          <TouchableOpacity
+            onPress={handleLeave}
+            style={[styles.sidePill, { backgroundColor: colors.destructive + "22" }]}
+          >
+            <Ionicons name="exit" size={18} color={colors.destructive} />
+          </TouchableOpacity>
         </View>
-
-        <TouchableOpacity
-          onPress={() => {
-            if (Platform.OS !== "web") Haptics.selectionAsync();
-            setShowShare(true);
-          }}
-          style={[styles.sideBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
-        >
-          <MaterialCommunityIcons name="share-variant" size={18} color={colors.foreground} />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          onPress={() => {
-            if (Platform.OS !== "web") Haptics.selectionAsync();
-            setShowHazardPicker(true);
-          }}
-          style={[styles.sideBtn, { backgroundColor: colors.card, borderColor: colors.border }]}
-        >
-          <MaterialCommunityIcons name="shield-alert" size={18} color={colors.foreground} />
-        </TouchableOpacity>
-
-        {/* AI voice assistant mic */}
-        <AiAssistantButton onHazardDetected={handleVoiceHazard} />
-
-        <TouchableOpacity
-          onPress={() => {
-            if (Platform.OS !== "web") Haptics.selectionAsync();
-            setShowRegroup(true);
-          }}
-          style={[
-            styles.sideBtn,
-            {
-              backgroundColor: gapWarnings.size > 0 ? colors.warning + "22" : colors.card,
-              borderColor: gapWarnings.size > 0 ? colors.warning : colors.border,
-            },
-          ]}
-        >
-          <MaterialCommunityIcons
-            name="gas-station"
-            size={18}
-            color={gapWarnings.size > 0 ? colors.warning : colors.foreground}
-          />
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          onPress={handleLeave}
-          style={[styles.sideBtn, { backgroundColor: colors.destructive + "22", borderColor: colors.destructive + "44" }]}
-        >
-          <Ionicons name="exit" size={18} color={colors.destructive} />
-        </TouchableOpacity>
       </View>
 
-      {/* ── Gap warning banner ───────────────────────────── */}
-      {gapWarnings.size > 0 && !gapBannerDismissed && (
-        <View
-          style={[
-            styles.gapBanner,
-            { top: floatTop + 52 },
-          ]}
+      {/* ── Gap warning banner — always mounted so exit animation plays ── */}
+      <RAnimated.View
+        style={[styles.gapBanner, { top: floatTop + 52 }, gapBannerAnimStyle]}
+        pointerEvents={gapBannerVisible ? "auto" : "none"}
+      >
+        <MaterialCommunityIcons name="alert" size={16} color="#fff" />
+        <Text style={styles.gapBannerText} numberOfLines={1}>
+          {Array.from(gapWarnings)
+            .map((id) => session.vehicles.find((v) => v.id === id)?.name ?? "A vehicle")
+            .join(", ")}{" "}
+          {gapWarnings.size === 1 ? "is" : "are"} falling behind
+        </Text>
+        <TouchableOpacity
+          onPress={() => { setGapBannerDismissed(true); setShowRegroup(true); }}
+          style={styles.gapBannerRegroup}
+          hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
         >
-          <MaterialCommunityIcons name="alert" size={16} color="#fff" />
-          <Text style={styles.gapBannerText} numberOfLines={1}>
-            {Array.from(gapWarnings)
-              .map((id) => session.vehicles.find((v) => v.id === id)?.name ?? "A vehicle")
-              .join(", ")}{" "}
-            {gapWarnings.size === 1 ? "is" : "are"} falling behind
-          </Text>
-          <TouchableOpacity
-            onPress={() => { setGapBannerDismissed(true); setShowRegroup(true); }}
-            style={styles.gapBannerRegroup}
-            hitSlop={{ top: 4, bottom: 4, left: 4, right: 4 }}
-          >
-            <MaterialCommunityIcons name="gas-station" size={13} color="#fff" />
-            <Text style={styles.gapBannerRegroupText}>Regroup</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => setGapBannerDismissed(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <MaterialCommunityIcons name="close" size={16} color="#fff" />
-          </TouchableOpacity>
-        </View>
-      )}
+          <MaterialCommunityIcons name="gas-station" size={13} color="#fff" />
+          <Text style={styles.gapBannerRegroupText}>Regroup</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => setGapBannerDismissed(true)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <MaterialCommunityIcons name="close" size={16} color="#fff" />
+        </TouchableOpacity>
+      </RAnimated.View>
 
       {/* ── Voice token renewal warning banner ───────────── */}
       {voiceTokenWarning && (
@@ -849,8 +974,11 @@ export default function MapScreen() {
         </View>
       )}
 
-      {/* ── MergePill (follower joining) ─────────────────── */}
-      {!isLeader && mergeState && !mergeState.onConvoyRoute && (
+      {/* ── MergePill (follower joining convoy or navigating to regroup pin) ── */}
+      {!isLeader && (
+        (mergeState && !mergeState.onConvoyRoute) ||
+        nav?.navSource === "regroup"
+      ) && (
         <MergePill />
       )}
 
@@ -1050,6 +1178,10 @@ export default function MapScreen() {
                 onVehicleTap={handleVehicleTap}
                 isLeader={isLeader}
                 onLeaderHandoff={isLeader ? transferLeadership : undefined}
+                isJoining={!!(mergeState && !mergeState.onConvoyRoute)}
+                distanceToMergeM={mergeState && !mergeState.onConvoyRoute ? mergeState.distanceToMergeM : undefined}
+                myVehicleId={myVehicle?.id}
+                vehicleRegroupEtas={vehicleRegroupEtas}
               />
             )}
 
@@ -1096,6 +1228,7 @@ export default function MapScreen() {
             vehicles={session?.vehicles ?? []}
             navigation={lastNavRef.current}
             gapWarnings={gapWarnings}
+            mergeState={mergeState}
           />
         )}
       </Animated.View>
@@ -1129,6 +1262,7 @@ export default function MapScreen() {
               currentStepIndex: 0,
               totalDistanceM: result.totalDistanceM,
               totalDurationS: result.totalDurationS,
+              totalDurationInTrafficS: result.totalDurationInTrafficS,
             });
             if (result.steps.length > 0) {
               announceNavStep(result.steps[0].instruction, result.steps[0].distanceM);
@@ -1191,6 +1325,7 @@ export default function MapScreen() {
                   currentStepIndex: 0,
                   totalDistanceM: result.totalDistanceM,
                   totalDurationS: result.totalDurationS,
+                  totalDurationInTrafficS: result.totalDurationInTrafficS,
                 });
                 if (result.steps.length > 0) {
                   announceNavStep(result.steps[0].instruction, result.steps[0].distanceM);
@@ -1209,6 +1344,7 @@ export default function MapScreen() {
                   currentStepIndex: 0,
                   totalDistanceM: result.totalDistanceM,
                   totalDurationS: result.totalDurationS,
+                  totalDurationInTrafficS: result.totalDurationInTrafficS,
                 });
                 if (result.steps.length > 0) {
                   announceNavStep(result.steps[0].instruction, result.steps[0].distanceM);
@@ -1266,7 +1402,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#14532d",
     borderWidth: 1,
     borderColor: "#22c55e44",
-    zIndex: 20,
+    zIndex: 100,
     ...Platform.select({
       ios: { shadowColor: "#22c55e", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.4, shadowRadius: 8 },
       android: { elevation: 6 },
@@ -1284,14 +1420,14 @@ const styles = StyleSheet.create({
   pttFloat: {
     position: "absolute",
     right: 16,
-    zIndex: 20,
+    zIndex: 100,
   },
 
   /* route overview mini-map anchor */
   miniMapAnchor: {
     position: "absolute",
     left: 12,
-    zIndex: 18,
+    zIndex: 60,
   },
 
   /* private PTT status pill */
@@ -1305,7 +1441,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 7,
     borderRadius: 20,
-    zIndex: 20,
+    zIndex: 100,
   },
   privatePillText: {
     color: "#fff",
@@ -1335,7 +1471,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     top: 0,
-    zIndex: 30,
+    zIndex: 100,
   },
 
   /* convoy pill */
@@ -1350,7 +1486,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
-    zIndex: 20,
+    zIndex: 100,
   },
   pillCode: {
     fontSize: 11,
@@ -1384,6 +1520,25 @@ const styles = StyleSheet.create({
   },
   carCountText: { fontSize: 12, fontWeight: "700", fontFamily: "Inter_700Bold" },
 
+  formationBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  formationDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  formationText: {
+    fontSize: 10,
+    fontWeight: "700",
+    fontFamily: "Inter_700Bold",
+  },
+
   /* gap warning banner */
   gapBanner: {
     position: "absolute",
@@ -1396,7 +1551,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    zIndex: 25,
+    zIndex: 100,
     ...Platform.select({
       ios: { shadowColor: "#ef4444", shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.35, shadowRadius: 8 },
       android: { elevation: 5 },
@@ -1433,21 +1588,25 @@ const styles = StyleSheet.create({
   rightSidebar: {
     position: "absolute",
     right: 12,
-    flexDirection: "column",
-    gap: 8,
-    zIndex: 20,
+    zIndex: 100,
   },
-  sideBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 12,
+  sideCard: {
+    borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
+    overflow: "hidden",
+    ...Platform.select({
+      ios: { shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.14, shadowRadius: 8 },
+      android: { elevation: 4 },
+    }),
+  },
+  sidePill: {
+    width: 44,
+    height: 44,
     alignItems: "center",
     justifyContent: "center",
-    ...Platform.select({
-      ios: { shadowColor: "#000", shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.12, shadowRadius: 6 },
-      android: { elevation: 3 },
-    }),
+  },
+  sideDivider: {
+    height: StyleSheet.hairlineWidth,
   },
   sideBtnLabel: {
     fontSize: 12,
@@ -1466,7 +1625,7 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     paddingTop: 10,
     gap: 0,
-    zIndex: 20,
+    zIndex: 100,
   },
   sheetHandle: {
     width: 36,

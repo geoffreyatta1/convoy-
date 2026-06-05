@@ -116,6 +116,10 @@ wss.on("connection", (ws, req) => {
       // Shared regroup map pin — broadcast to all convoy members so the
       // flag icon appears on everyone's map. regroup_pin_clear removes it.
       broadcast(room, client, JSON.stringify(msg));
+    } else if (type === "regroup_eta") {
+      // Follower live ETA to the regroup pin — broadcast to all room members
+      // so the leader's formation strip can show per-vehicle progress.
+      broadcast(room, client, JSON.stringify(msg));
     } else if (type === "stop_proposal" || type === "stop_proposal_response") {
       // Location-based stop suggestion — broadcast so all members see the
       // proposal banner and can accept or decline independently.
@@ -147,7 +151,7 @@ async function initStripe() {
   }
   try {
     logger.info("Initializing Stripe schema...");
-    await runMigrations({ databaseUrl, schema: "stripe" });
+    await runMigrations({ databaseUrl });
     logger.info("Stripe schema ready");
 
     const stripeSync = await getStripeSync();

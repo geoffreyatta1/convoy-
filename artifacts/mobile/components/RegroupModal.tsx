@@ -114,6 +114,7 @@ export default function RegroupModal({ visible, onClose }: Props) {
       currentStepIndex: 0,
       totalDistanceM: route.totalDistanceM,
       totalDurationS: route.totalDurationS,
+      totalDurationInTrafficS: route.totalDurationInTrafficS,
     });
     onClose();
   };

@@ -26,6 +26,8 @@ export interface CarPlayState {
   upcomingSteps?: Array<{ instruction: string; distanceM: number; icon: string }>;
   /** Vehicles that have exceeded the gap threshold, with their distance to the leader. */
   gapWarningVehicles?: Array<{ id: string; name: string; distanceM: number }>;
+  /** Active regroup pin broadcast by a convoy member, if any. */
+  regroupPin?: { name: string; lat: number; lng: number };
 }
 
 export function registerCarPlayCallbacks(_start: () => void, _stop: () => void) {}

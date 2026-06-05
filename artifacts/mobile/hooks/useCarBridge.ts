@@ -32,7 +32,9 @@ export function useCarBridge() {
     startTalking,
     stopTalking,
     gapWarnings,
+    mergeState,
     clearNavigation,
+    regroupPin,
   } = useConvoy();
 
   // Register talk callbacks once
@@ -65,6 +67,13 @@ export function useCarBridge() {
         ),
       }));
   }, [session, gapWarnings]);
+
+  // True when all vehicles are within gap threshold, ≥2 cars, no merge in progress
+  const isInFormation = useMemo(() => {
+    if (!session || session.vehicles.length < 2) return false;
+    if (mergeState && !mergeState.onConvoyRoute) return false;
+    return gapWarnings.size === 0;
+  }, [session, gapWarnings, mergeState]);
 
   // When the convoy session ends while CarPlay is connected, show the idle screen
   useEffect(() => {
@@ -117,9 +126,17 @@ export function useCarBridge() {
       currentStepIndex,
       upcomingSteps,
       gapWarningVehicles,
+      isInFormation,
+      distanceToMergeM:
+        mergeState && !mergeState.onConvoyRoute
+          ? mergeState.distanceToMergeM
+          : undefined,
+      regroupPin: regroupPin
+        ? { name: regroupPin.name, lat: regroupPin.lat, lng: regroupPin.lng }
+        : undefined,
     };
 
     updateCarPlayUI(state);
     updateAndroidAutoUI(state);
-  }, [session, isTalking, gapWarningVehicles]);
+  }, [session, isTalking, gapWarningVehicles, isInFormation, mergeState, regroupPin]);
 }

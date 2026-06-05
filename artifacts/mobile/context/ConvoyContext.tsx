@@ -5,6 +5,7 @@ import {
   suppressTts,
   resumeTts,
   announceGapWarning,
+  announceConvoyRegrouped,
   announceGapCleared,
   announceHazard,
   announceNavStep,
@@ -41,9 +42,13 @@ import {
   WsStopRequestMessage,
   WsStopResponseMessage,
   WsRegroupPinMessage,
+  WsRegroupEtaMessage,
   WsStopProposalMessage,
   WsStopProposalResponseMessage,
   WsLeaderHandoffMessage,
+  WsNavStartMessage,
+  WsNavStepMessage,
+  WsNavClearMessage,
   type StopStation,
 } from "@/services/convoy-ws";
 export type { StopStation, WsStopProposalMessage };
@@ -136,6 +141,11 @@ export interface NavigationState {
   currentStepIndex: number;
   totalDistanceM: number;
   totalDurationS: number;
+  /** Traffic-aware total duration (duration_in_traffic from Google Directions).
+   *  Equals totalDurationS when traffic data is unavailable. */
+  totalDurationInTrafficS: number;
+  /** "self" when this device initiated navigation; "leader" when synced from convoy leader; "regroup" when navigating to a regroup pin. */
+  navSource?: "self" | "leader" | "regroup";
 }
 
 /**
@@ -312,6 +322,12 @@ interface ConvoyContextValue {
   /** Response counts for a stop proposal sent by this driver */
   stopProposalResponses: { accepts: number; declines: number } | null;
   /**
+   * Per-vehicle distance + ETA to the active regroup pin.
+   * Populated from `regroup_eta` WS messages; keyed by vehicleId.
+   * Empty map when no regroup pin is active.
+   */
+  vehicleRegroupEtas: Map<string, { distanceM: number; etaS: number }>;
+  /**
    * True when all convoy vehicles (≥2) are within 50 m of the centroid.
    * Triggers the proximity sync overhead view.
    */
@@ -396,6 +412,7 @@ export function ConvoyProvider({ children }: { children: React.ReactNode }) {
   const [gapThresholdM, setGapThresholdMState] = useState<number>(GAP_THRESHOLD_M);
   const [regroupPin, setRegroupPin] = useState<RegroupPin | null>(null);
   const regroupPinRef = useRef<RegroupPin | null>(null);
+  const [vehicleRegroupEtas, setVehicleRegroupEtas] = useState<Map<string, { distanceM: number; etaS: number }>>(new Map());
   const didStartTransmittingRef = useRef(false);
   const talkTargetRef = useRef<Vehicle | null>(null);
 
@@ -407,6 +424,8 @@ export function ConvoyProvider({ children }: { children: React.ReactNode }) {
   const locationIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const talkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Cleanup fn for the Web Audio silence detector (non-Agora / web path only). */
+  const webSilenceCleanupRef = useRef<(() => void) | null>(null);
   /** 30-second idle timer that tears down the private channel after silence. */
   const privateIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Info needed by the idle-timer callback; avoids stale closures. */
@@ -488,6 +507,7 @@ export function ConvoyProvider({ children }: { children: React.ReactNode }) {
     const pinIdToRemove = pin.pinId;
     setRegroupPin(null);
     regroupPinRef.current = null;
+    setVehicleRegroupEtas(new Map());
     wsClientRef.current.sendRegroupPinClear(pinIdToRemove);
   }, []);
 
@@ -890,12 +910,24 @@ export function ConvoyProvider({ children }: { children: React.ReactNode }) {
         };
         setRegroupPin(pin);
         regroupPinRef.current = pin;
+        // Reset ETA data whenever a new (or replaced) pin arrives
+        setVehicleRegroupEtas(new Map());
       },
       onRegroupPinClear: (msg) => {
         // Only clear if the incoming message matches the currently active pin
         if (regroupPinRef.current?.pinId !== msg.pinId) return;
         setRegroupPin(null);
         regroupPinRef.current = null;
+        setVehicleRegroupEtas(new Map());
+      },
+      onRegroupEta: (msg: WsRegroupEtaMessage) => {
+        // Ignore stale ETA updates that belong to a different pin
+        if (regroupPinRef.current?.pinId !== msg.pinId) return;
+        setVehicleRegroupEtas((prev) => {
+          const next = new Map(prev);
+          next.set(msg.vehicleId, { distanceM: msg.distanceM, etaS: msg.etaS });
+          return next;
+        });
       },
       onStopProposal: (msg: WsStopProposalMessage) => {
         // Ignore our own proposals (we're the proposer)
@@ -968,6 +1000,7 @@ export function ConvoyProvider({ children }: { children: React.ReactNode }) {
                   currentStepIndex: 0,
                   totalDistanceM: result.totalDistanceM,
                   totalDurationS: result.totalDurationS,
+                  totalDurationInTrafficS: result.totalDurationInTrafficS,
                 });
                 if (result.steps.length > 0) {
                   announceNavStep(result.steps[0].instruction, result.steps[0].distanceM);
@@ -988,6 +1021,7 @@ export function ConvoyProvider({ children }: { children: React.ReactNode }) {
                   currentStepIndex: 0,
                   totalDistanceM: result.totalDistanceM,
                   totalDurationS: result.totalDurationS,
+                  totalDurationInTrafficS: result.totalDurationInTrafficS,
                 });
                 if (result.steps.length > 0) {
                   announceNavStep(result.steps[0].instruction, result.steps[0].distanceM);
@@ -1012,6 +1046,48 @@ export function ConvoyProvider({ children }: { children: React.ReactNode }) {
           if (!prev) return prev;
           return { ...prev, isLeader: prev.id === msg.toVehicleId };
         });
+      },
+      onNavStart: async (msg: WsNavStartMessage) => {
+        // Ignore our own broadcast (server relay echoes back to sender)
+        const myId = sessionRef.current?.vehicles.find((v) => v.isMe)?.id;
+        if (msg.fromVehicleId === myId) return;
+
+        // Follower: fetch a route from current position to the destination
+        const myVeh = sessionRef.current?.vehicles.find((v) => v.isMe);
+        if (!myVeh) return;
+
+        const result = await fetchRoute(
+          myVeh.location.latitude,
+          myVeh.location.longitude,
+          msg.destination.latitude,
+          msg.destination.longitude,
+        );
+        if (!result) return;
+
+        const nav: NavigationState = {
+          destination: msg.destination,
+          route: result.route,
+          steps: result.steps,
+          currentStepIndex: 0,
+          totalDistanceM: result.totalDistanceM,
+          totalDurationS: result.totalDurationS,
+          totalDurationInTrafficS: result.totalDurationInTrafficS,
+          navSource: "leader",
+        };
+        startNavigationRef.current?.(nav);
+        if (result.steps.length > 0) {
+          announceNavStep(result.steps[0].instruction, result.steps[0].distanceM);
+        }
+      },
+      onNavStep: (msg: WsNavStepMessage) => {
+        const myId = sessionRef.current?.vehicles.find((v) => v.isMe)?.id;
+        if (msg.fromVehicleId === myId) return;
+        advanceNavStepRef.current?.(msg.stepIndex);
+      },
+      onNavClear: (msg: WsNavClearMessage) => {
+        const myId = sessionRef.current?.vehicles.find((v) => v.isMe)?.id;
+        if (msg.fromVehicleId === myId) return;
+        clearNavigationRef.current?.();
       },
     });
   }, []);
@@ -1265,6 +1341,19 @@ export function ConvoyProvider({ children }: { children: React.ReactNode }) {
             location.heading,
             location.speed,
           );
+          // Broadcast regroup ETA when this follower is navigating to the active regroup pin
+          const pin = regroupPinRef.current;
+          if (pin && currentSession.navigation?.navSource === "regroup") {
+            const distanceM = haversineMeters(
+              location.latitude,
+              location.longitude,
+              pin.lat,
+              pin.lng,
+            );
+            const AVG_SPEED_MPS = 11.2;
+            const etaS = distanceM / AVG_SPEED_MPS;
+            wsClientRef.current.sendRegroupEta(me.id, pin.pinId, distanceM, etaS);
+          }
         }
       }
     },
@@ -1316,6 +1405,8 @@ export function ConvoyProvider({ children }: { children: React.ReactNode }) {
   );
 
   const startNavigationRef = useRef<((nav: NavigationState) => void) | null>(null);
+  const advanceNavStepRef = useRef<((index: number) => void) | null>(null);
+  const clearNavigationRef = useRef<(() => void) | null>(null);
 
   const startNavigation = useCallback((nav: NavigationState) => {
     setMergeState(null);
@@ -1340,10 +1431,15 @@ export function ConvoyProvider({ children }: { children: React.ReactNode }) {
       saveSession(updated);
       return updated;
     });
+    // Leader broadcasts nav_start so all followers sync their routes.
+    const me = sessionRef.current?.vehicles.find((v) => v.isMe);
+    if (me?.isLeader && nav.navSource !== "leader") {
+      wsClientRef.current.sendNavStart(me.id, nav.destination);
+    }
   }, []);
 
-  // Keep startNavigationRef in sync so WS callbacks (registered on mount) can
-  // call the latest version without stale closure issues.
+  // Keep refs in sync so WS callbacks (registered on mount) can call the
+  // latest version of each function without stale closure issues.
   useEffect(() => {
     startNavigationRef.current = startNavigation;
   }, [startNavigation]);
@@ -1358,7 +1454,16 @@ export function ConvoyProvider({ children }: { children: React.ReactNode }) {
       saveSession(updated);
       return updated;
     });
+    // Leader broadcasts step advance so all followers stay in sync.
+    const me = sessionRef.current?.vehicles.find((v) => v.isMe);
+    if (me?.isLeader) {
+      wsClientRef.current.sendNavStep(me.id, index);
+    }
   }, []);
+
+  useEffect(() => {
+    advanceNavStepRef.current = advanceNavStep;
+  }, [advanceNavStep]);
 
   const clearNavigation = useCallback(() => {
     setMergeState(null);
@@ -1370,7 +1475,16 @@ export function ConvoyProvider({ children }: { children: React.ReactNode }) {
       saveSession(updated);
       return updated;
     });
+    // Leader broadcasts nav_clear so all followers stop navigating.
+    const me = sessionRef.current?.vehicles.find((v) => v.isMe);
+    if (me?.isLeader) {
+      wsClientRef.current.sendNavClear(me.id);
+    }
   }, []);
+
+  useEffect(() => {
+    clearNavigationRef.current = clearNavigation;
+  }, [clearNavigation]);
 
   // ─── Merge routing ──────────────────────────────────────────────────────────
 
@@ -1611,6 +1725,7 @@ export function ConvoyProvider({ children }: { children: React.ReactNode }) {
             currentStepIndex: 0,
             totalDistanceM: result.totalDistanceM,
             totalDurationS: result.totalDurationS,
+            totalDurationInTrafficS: result.totalDurationInTrafficS,
           });
         }
       } else {
@@ -1626,6 +1741,7 @@ export function ConvoyProvider({ children }: { children: React.ReactNode }) {
             currentStepIndex: 0,
             totalDistanceM: result.totalDistanceM,
             totalDurationS: result.totalDurationS,
+            totalDurationInTrafficS: result.totalDurationInTrafficS,
           });
         }
       }
@@ -1655,6 +1771,7 @@ export function ConvoyProvider({ children }: { children: React.ReactNode }) {
             currentStepIndex: 0,
             totalDistanceM: result.totalDistanceM,
             totalDurationS: result.totalDurationS,
+            totalDurationInTrafficS: result.totalDurationInTrafficS,
           });
           if (result.steps.length > 0) {
             announceNavStep(result.steps[0].instruction, result.steps[0].distanceM);
@@ -1673,6 +1790,7 @@ export function ConvoyProvider({ children }: { children: React.ReactNode }) {
             currentStepIndex: 0,
             totalDistanceM: result.totalDistanceM,
             totalDurationS: result.totalDurationS,
+            totalDurationInTrafficS: result.totalDurationInTrafficS,
           });
           if (result.steps.length > 0) {
             announceNavStep(result.steps[0].instruction, result.steps[0].distanceM);
@@ -1776,7 +1894,50 @@ export function ConvoyProvider({ children }: { children: React.ReactNode }) {
     didStartTransmittingRef.current = true;
     setIsTalking(true);
     suppressTts();
-    // Safety cut-off: auto-stop after 30 s so mic is never left open accidentally
+
+    // Non-Agora path (web / simulator): use Web Audio API to detect silence
+    // and auto-stop after 2 s of quiet, matching the Agora VAD behaviour.
+    if (!isAgoraAvailable() && typeof navigator !== "undefined" && navigator.mediaDevices?.getUserMedia) {
+      // Clean up any previous detector that may have leaked.
+      webSilenceCleanupRef.current?.();
+      webSilenceCleanupRef.current = null;
+      navigator.mediaDevices.getUserMedia({ audio: true, video: false }).then((stream) => {
+        const AudioContextCtor: typeof AudioContext =
+          window.AudioContext ?? (window as unknown as Record<string, typeof AudioContext>).webkitAudioContext;
+        if (!AudioContextCtor) { stream.getTracks().forEach((t) => t.stop()); return; }
+        const ctx = new AudioContextCtor();
+        const source = ctx.createMediaStreamSource(stream);
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 256;
+        source.connect(analyser);
+        const data = new Uint8Array(analyser.frequencyBinCount);
+        const SILENCE_THRESHOLD = 10; // 0–255
+        const SILENCE_DELAY_MS = 2000;
+        let silenceStart: number | null = null;
+        const cleanup = () => {
+          clearInterval(intervalId);
+          stream.getTracks().forEach((t) => t.stop());
+          ctx.close().catch(() => {});
+          if (webSilenceCleanupRef.current === cleanup) webSilenceCleanupRef.current = null;
+        };
+        const intervalId = setInterval(() => {
+          if (!didStartTransmittingRef.current) { cleanup(); return; }
+          analyser.getByteFrequencyData(data);
+          let peak = 0;
+          for (let i = 0; i < data.length; i++) if (data[i] > peak) peak = data[i];
+          if (peak <= SILENCE_THRESHOLD) {
+            if (silenceStart === null) silenceStart = Date.now();
+            else if (Date.now() - silenceStart >= SILENCE_DELAY_MS) { cleanup(); stopTalking(); }
+          } else {
+            silenceStart = null;
+          }
+        }, 100);
+        webSilenceCleanupRef.current = cleanup;
+      }).catch(() => { /* no mic access — hard timeout is the only safeguard */ });
+    }
+
+    // Last-resort hard cut-off: stops any open mic that silence detection missed
+    // (e.g. continuous loud background noise, or mic permission denied on web).
     if (talkTimerRef.current) clearTimeout(talkTimerRef.current);
     talkTimerRef.current = setTimeout(() => {
       stopTalking();
@@ -1853,6 +2014,9 @@ export function ConvoyProvider({ children }: { children: React.ReactNode }) {
       clearTimeout(silenceTimerRef.current);
       silenceTimerRef.current = null;
     }
+    // Stop the Web Audio silence detector (non-Agora / web path).
+    webSilenceCleanupRef.current?.();
+    webSilenceCleanupRef.current = null;
 
     if (!wasTransmitting || !me || !currentSession) return;
 
@@ -2107,7 +2271,9 @@ export function ConvoyProvider({ children }: { children: React.ReactNode }) {
       const pinIdToRemove = regroupPin.pinId;
       setRegroupPin(null);
       regroupPinRef.current = null;
+      setVehicleRegroupEtas(new Map());
       wsClientRef.current.sendRegroupPinClear(pinIdToRemove);
+      announceConvoyRegrouped();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps -- session?.vehicles is the specific dep; adding full session would re-run on every message update
   }, [session?.vehicles, regroupPin]);
@@ -2171,6 +2337,7 @@ export function ConvoyProvider({ children }: { children: React.ReactNode }) {
         respondToStopProposal,
         dismissStopProposal,
         stopProposalResponses,
+        vehicleRegroupEtas,
         isInSyncZone,
         convoycentroid,
         clearSyncPTT,

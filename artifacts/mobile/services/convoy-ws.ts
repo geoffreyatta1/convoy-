@@ -5,6 +5,7 @@
  *  - Sending join / leave / location / ping messages
  *  - Receiving location updates, leave notifications, and hazard reports from peers
  *  - Private PTT signalling: invite a peer to join a one-to-one Agora channel
+ *  - Navigation sync: leader broadcasts nav_start/nav_step/nav_clear to followers
  *
  * Message shapes (both directions):
  *   { type: "join",              vehicleId, name, emoji, color, isLeader }
@@ -14,6 +15,9 @@
  *   { type: "ping" } / { type: "pong" }
  *   { type: "private_ptt",       fromVehicleId, targetVehicleId, channelName }
  *   { type: "private_ptt_end",   fromVehicleId, targetVehicleId, channelName }
+ *   { type: "nav_start",         fromVehicleId, destination }
+ *   { type: "nav_step",          fromVehicleId, stepIndex }
+ *   { type: "nav_clear",         fromVehicleId }
  */
 
 import { Hazard } from "./hazards";
@@ -123,6 +127,36 @@ export interface WsLeaderHandoffMessage {
   toVehicleName: string;
 }
 
+/** Leader → all: navigation session started. Followers fetch their own route
+ *  to the same destination and start navigating in sync. */
+export interface WsNavStartMessage {
+  type: "nav_start";
+  fromVehicleId: string;
+  destination: { latitude: number; longitude: number; name: string };
+}
+
+/** Leader → all: current nav step advanced to stepIndex. */
+export interface WsNavStepMessage {
+  type: "nav_step";
+  fromVehicleId: string;
+  stepIndex: number;
+}
+
+/** Leader → all: navigation cleared (arrived or cancelled). */
+export interface WsNavClearMessage {
+  type: "nav_clear";
+  fromVehicleId: string;
+}
+
+/** Follower → all: live distance + ETA to the active regroup pin. */
+export interface WsRegroupEtaMessage {
+  type: "regroup_eta";
+  vehicleId: string;
+  pinId: string;
+  distanceM: number;
+  etaS: number;
+}
+
 export interface WsJoinMessage {
   type: "join";
   vehicleId: string;
@@ -145,7 +179,11 @@ export type WsIncomingMessage =
   | WsRegroupPinClearMessage
   | WsStopProposalMessage
   | WsStopProposalResponseMessage
-  | WsLeaderHandoffMessage;
+  | WsLeaderHandoffMessage
+  | WsNavStartMessage
+  | WsNavStepMessage
+  | WsNavClearMessage
+  | WsRegroupEtaMessage;
 
 export interface ConvoyWsCallbacks {
   onJoin?: (msg: WsJoinMessage) => void;
@@ -161,6 +199,10 @@ export interface ConvoyWsCallbacks {
   onStopProposal?: (msg: WsStopProposalMessage) => void;
   onStopProposalResponse?: (msg: WsStopProposalResponseMessage) => void;
   onLeaderHandoff?: (msg: WsLeaderHandoffMessage) => void;
+  onNavStart?: (msg: WsNavStartMessage) => void;
+  onNavStep?: (msg: WsNavStepMessage) => void;
+  onNavClear?: (msg: WsNavClearMessage) => void;
+  onRegroupEta?: (msg: WsRegroupEtaMessage) => void;
   onOpen?: () => void;
   onClose?: () => void;
 }
@@ -237,6 +279,14 @@ export class ConvoyWsClient {
             this.callbacks?.onStopProposalResponse?.(msg);
           } else if (msg.type === "leader_handoff") {
             this.callbacks?.onLeaderHandoff?.(msg);
+          } else if (msg.type === "nav_start") {
+            this.callbacks?.onNavStart?.(msg);
+          } else if (msg.type === "nav_step") {
+            this.callbacks?.onNavStep?.(msg);
+          } else if (msg.type === "nav_clear") {
+            this.callbacks?.onNavClear?.(msg);
+          } else if (msg.type === "regroup_eta") {
+            this.callbacks?.onRegroupEta?.(msg);
           }
         } catch {
         }
@@ -345,6 +395,26 @@ export class ConvoyWsClient {
   /** Broadcast a leadership transfer to all convoy members */
   sendLeaderHandoff(fromVehicleId: string, toVehicleId: string, toVehicleName: string) {
     this.send(JSON.stringify({ type: "leader_handoff", fromVehicleId, toVehicleId, toVehicleName }));
+  }
+
+  /** Leader: broadcast navigation start so followers can sync their routes */
+  sendNavStart(fromVehicleId: string, destination: { latitude: number; longitude: number; name: string }) {
+    this.send(JSON.stringify({ type: "nav_start", fromVehicleId, destination }));
+  }
+
+  /** Leader: broadcast step advance so all followers stay on the same step */
+  sendNavStep(fromVehicleId: string, stepIndex: number) {
+    this.send(JSON.stringify({ type: "nav_step", fromVehicleId, stepIndex }));
+  }
+
+  /** Leader: broadcast navigation cleared (arrival or manual cancel) */
+  sendNavClear(fromVehicleId: string) {
+    this.send(JSON.stringify({ type: "nav_clear", fromVehicleId }));
+  }
+
+  /** Follower: broadcast live distance + ETA to the active regroup pin */
+  sendRegroupEta(vehicleId: string, pinId: string, distanceM: number, etaS: number) {
+    this.send(JSON.stringify({ type: "regroup_eta", vehicleId, pinId, distanceM, etaS }));
   }
 
   private send(payload: string) {

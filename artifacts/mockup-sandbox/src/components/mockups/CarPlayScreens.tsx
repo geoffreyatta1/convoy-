@@ -540,14 +540,271 @@ function ScreenIdle() {
   );
 }
 
+// ─── Screen 5: In Formation status ────────────────────────────────────────────
+
+function ScreenInFormation() {
+  return (
+    <Frame label="Screen 5 — Formation Status (MapTemplate · all cars in sync)">
+      <StatusBar />
+      {/* NavBar shows convoy code + "In formation" pill + Talk button */}
+      <div
+        style={{
+          height: NAV_H,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "0 24px",
+          background: "rgba(28,28,30,0.95)",
+          backdropFilter: "blur(20px)",
+          borderBottom: `1px solid ${DIVIDER}`,
+          flexShrink: 0,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ background: SURFACE2, borderRadius: 8, padding: "6px 14px" }}>
+            <span style={{ color: TEXT2, fontSize: 14, fontWeight: 600 }}>A3X9F2</span>
+          </div>
+          {/* Formation status pill — shown when gapWarnings.size === 0 and ≥2 cars */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              background: "rgba(34,197,94,0.15)",
+              border: "1px solid rgba(34,197,94,0.35)",
+              borderRadius: 8,
+              padding: "6px 12px",
+            }}
+          >
+            <div
+              style={{
+                width: 8,
+                height: 8,
+                borderRadius: 4,
+                background: "#22c55e",
+                boxShadow: "0 0 6px #22c55e",
+              }}
+            />
+            <span style={{ color: "#22c55e", fontSize: 14, fontWeight: 700 }}>In formation</span>
+          </div>
+        </div>
+        <span style={{ color: TEXT, fontSize: 18, fontWeight: 700 }}>Desert Convoy</span>
+        <div style={{ background: SURFACE2, borderRadius: 8, padding: "6px 14px" }}>
+          <span style={{ color: TEXT, fontSize: 14, fontWeight: 600 }}>Talk</span>
+        </div>
+      </div>
+
+      {/* Map area showing tight convoy formation (3 car dots) */}
+      <div style={{ flex: 1, position: "relative", background: "#1a2433" }}>
+        {/* Simulated road */}
+        <div
+          style={{
+            position: "absolute",
+            left: "50%",
+            top: 0,
+            bottom: 0,
+            width: 48,
+            transform: "translateX(-50%)",
+            background: "#2d3748",
+          }}
+        />
+        {/* Dashes */}
+        {[100, 200, 300, 400, 500].map((top) => (
+          <div
+            key={top}
+            style={{
+              position: "absolute",
+              left: "50%",
+              top,
+              width: 4,
+              height: 32,
+              transform: "translateX(-50%)",
+              background: "#f59e0b",
+              opacity: 0.5,
+            }}
+          />
+        ))}
+
+        {/* Car dots — tight formation, green rings */}
+        {[
+          { top: 200, label: "You", color: ORANGE },
+          { top: 270, label: "Maya", color: "#3b82f6" },
+          { top: 340, label: "Raj", color: "#a855f7" },
+        ].map(({ top, label, color }) => (
+          <div key={label} style={{ position: "absolute", left: "calc(50% - 18px)", top }}>
+            <div
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: 18,
+                background: color,
+                border: "3px solid #22c55e",
+                boxShadow: `0 0 14px ${color}88`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}
+            >
+              <span style={{ fontSize: 16 }}>🚗</span>
+            </div>
+            <div
+              style={{
+                marginTop: 4,
+                background: "rgba(0,0,0,0.7)",
+                borderRadius: 4,
+                padding: "2px 6px",
+                textAlign: "center",
+              }}
+            >
+              <span style={{ color: TEXT, fontSize: 11, fontWeight: 600 }}>{label}</span>
+            </div>
+          </div>
+        ))}
+
+        {/* Formation confirmed banner */}
+        <div
+          style={{
+            position: "absolute",
+            bottom: 32,
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: "rgba(34,197,94,0.2)",
+            border: "1px solid rgba(34,197,94,0.5)",
+            borderRadius: 12,
+            padding: "12px 28px",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            whiteSpace: "nowrap",
+          }}
+        >
+          <span style={{ fontSize: 20 }}>✅</span>
+          <span style={{ color: "#22c55e", fontSize: 16, fontWeight: 700 }}>
+            All 3 vehicles in formation
+          </span>
+        </div>
+      </div>
+    </Frame>
+  );
+}
+
+// ─── Screen 6: PTT / VoiceControlTemplate active ───────────────────────────────
+
+function ScreenPTTActive() {
+  return (
+    <Frame label="Screen 6 — Push-to-Talk Active (VoiceControlTemplate)">
+      <StatusBar />
+      <NavBar title="Push-to-Talk" leftLabel="A3X9F2" rightLabel="Release" rightOrange />
+
+      <div
+        style={{
+          flex: 1,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 32,
+          background: BG,
+        }}
+      >
+        {/* Pulsing mic indicator */}
+        <div style={{ position: "relative", width: 160, height: 160, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          {/* Outer pulse ring */}
+          <div
+            style={{
+              position: "absolute",
+              width: 160,
+              height: 160,
+              borderRadius: 80,
+              border: `2px solid ${ORANGE}`,
+              opacity: 0.25,
+            }}
+          />
+          {/* Mid ring */}
+          <div
+            style={{
+              position: "absolute",
+              width: 120,
+              height: 120,
+              borderRadius: 60,
+              border: `2px solid ${ORANGE}`,
+              opacity: 0.5,
+            }}
+          />
+          {/* Core button */}
+          <div
+            style={{
+              width: 84,
+              height: 84,
+              borderRadius: 42,
+              background: ORANGE,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              boxShadow: `0 0 32px ${ORANGE}88`,
+            }}
+          >
+            <span style={{ fontSize: 36 }}>🎙️</span>
+          </div>
+        </div>
+
+        {/* Waveform bars */}
+        <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
+          {[18, 36, 52, 40, 62, 48, 30, 56, 38, 20, 44, 32, 60, 26, 50].map((h, i) => (
+            <div
+              key={i}
+              style={{
+                width: 6,
+                height: h,
+                borderRadius: 3,
+                background: ORANGE,
+                opacity: 0.7 + (i % 3) * 0.1,
+              }}
+            />
+          ))}
+        </div>
+
+        {/* Label */}
+        <div style={{ textAlign: "center" }}>
+          <div style={{ color: ORANGE, fontSize: 22, fontWeight: 700, marginBottom: 6 }}>
+            Broadcasting to convoy
+          </div>
+          <div style={{ color: TEXT2, fontSize: 16 }}>Desert Convoy · 3 members</div>
+          <div style={{ color: TEXT2, fontSize: 14, marginTop: 8 }}>
+            Auto-releases in <span style={{ color: ORANGE }}>10 s</span>
+          </div>
+        </div>
+
+        {/* Release hint */}
+        <div
+          style={{
+            background: SURFACE,
+            border: `1px solid ${ORANGE}44`,
+            borderRadius: 12,
+            padding: "12px 28px",
+          }}
+        >
+          <span style={{ color: TEXT2, fontSize: 14 }}>
+            Press{" "}
+            <span style={{ color: TEXT, fontWeight: 600 }}>Release</span>
+            {" "}or use knob to end broadcast
+          </span>
+        </div>
+      </div>
+    </Frame>
+  );
+}
+
 // ─── Individual screen exports (used by per-screen routes) ────────────────────
 
 export { ScreenNavActive as CarPlayNav };
 export { ScreenMemberList as CarPlayList };
 export { ScreenGapAlert as CarPlayAlert };
 export { ScreenIdle as CarPlayIdle };
+export { ScreenInFormation as CarPlayFormation };
+export { ScreenPTTActive as CarPlayPTT };
 
-// ─── Root export (all 4 in one scrollable page) ────────────────────────────────
+// ─── Root export (all 6 in one scrollable page) ────────────────────────────────
 
 export default function CarPlayScreens() {
   return (
@@ -572,7 +829,7 @@ export default function CarPlayScreens() {
           Convoy — CarPlay Mockup Screens
         </h1>
         <p style={{ color: "#666", fontSize: 14, margin: 0 }}>
-          1280 × 720 px · Dark UI · For Apple CarPlay navigation entitlement
+          1280 × 720 px · Dark UI · 6 screens · For Apple CarPlay navigation entitlement
           application form
         </p>
       </div>
@@ -581,6 +838,8 @@ export default function CarPlayScreens() {
       <ScreenMemberList />
       <ScreenGapAlert />
       <ScreenIdle />
+      <ScreenInFormation />
+      <ScreenPTTActive />
     </div>
   );
 }

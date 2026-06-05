@@ -52,6 +52,8 @@ async function applyBranchProtection(): Promise<void> {
       strict: true,
       checks: [
         { context: "Type Check", app_id: null },
+        { context: "mobile-lint", app_id: null },
+        { context: "mobile-typecheck", app_id: null },
       ],
     },
     enforce_admins: true,
@@ -116,6 +118,14 @@ async function verifyBranchProtection(): Promise<void> {
     pass(
       `Required status check "Type Check" present`,
       checks?.some((c) => c.context === "Type Check") ?? false
+    );
+    pass(
+      `Required status check "mobile-lint" present`,
+      checks?.some((c) => c.context === "mobile-lint") ?? false
+    );
+    pass(
+      `Required status check "mobile-typecheck" present`,
+      checks?.some((c) => c.context === "mobile-typecheck") ?? false
     );
     pass(
       `Strict mode (branch must be up to date)`,

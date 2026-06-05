@@ -6,10 +6,12 @@ import { useSubscription } from "@/context/SubscriptionContext";
 
 interface Props {
   onHazardDetected: (hazardType: string) => void;
+  /** When true the button renders flush (no own border/bg) to sit inside a card container. */
+  inCard?: boolean;
   style?: object;
 }
 
-export default function AiAssistantButton({ style }: Props) {
+export default function AiAssistantButton({ inCard, style }: Props) {
   const colors = useColors();
   const { tier } = useSubscription();
 
@@ -28,8 +30,20 @@ export default function AiAssistantButton({ style }: Props) {
     );
   };
 
+  if (inCard) {
+    return (
+      <TouchableOpacity
+        onPress={handlePress}
+        activeOpacity={0.8}
+        style={[styles.pill, style]}
+      >
+        <MaterialCommunityIcons name="microphone" size={18} color={colors.mutedForeground} />
+      </TouchableOpacity>
+    );
+  }
+
   return (
-    <View style={[styles.wrapper, style]}>
+    <View style={styles.wrapper}>
       <TouchableOpacity
         onPress={handlePress}
         activeOpacity={0.8}
@@ -48,6 +62,12 @@ const styles = StyleSheet.create({
     height: 42,
     borderRadius: 12,
     borderWidth: StyleSheet.hairlineWidth,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pill: {
+    width: 44,
+    height: 44,
     alignItems: "center",
     justifyContent: "center",
   },

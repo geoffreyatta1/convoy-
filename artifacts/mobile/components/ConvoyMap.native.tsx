@@ -1,9 +1,8 @@
 
 import MaterialCommunityIcons from "@expo/vector-icons/MaterialCommunityIcons";
 import React, { useEffect, useRef } from "react";
-import { Animated, DeviceEventEmitter, Easing, Platform, StyleSheet, Text, View } from "react-native";
-import MapView, { Camera, Callout, Marker, Polyline, PROVIDER_GOOGLE, PROVIDER_DEFAULT } from "react-native-maps";
-import Constants from "expo-constants";
+import { Alert, Animated, DeviceEventEmitter, Easing, StyleSheet, Text, View } from "react-native";
+import MapView, { Camera, Callout, Marker, Polyline, PROVIDER_GOOGLE } from "react-native-maps";
 
 import { useState } from "react";
 
@@ -11,12 +10,10 @@ import { useColors } from "@/hooks/useColors";
 import { Vehicle, RegroupPin } from "@/context/ConvoyContext";
 import { Hazard } from "@/services/hazards";
 
-// All native/EAS builds (dev client, TestFlight, App Store, Play Store) use
-// PROVIDER_GOOGLE on both platforms. The only exception is Expo Go on iOS,
-// where the Google Maps iOS SDK is not bundled and would crash — Apple Maps
-// is used as a fallback there only.
-const isExpoGo = Constants.appOwnership === "expo";
-const MAP_PROVIDER = Platform.OS === "ios" && isExpoGo ? PROVIDER_DEFAULT : PROVIDER_GOOGLE;
+// Both iOS and Android use Google Maps (PROVIDER_GOOGLE).
+// The iOS build requires googleMapsApiKey in app.config.js so the
+// react-native-maps plugin includes the Google Maps iOS SDK pod (AirGoogleMaps).
+const MAP_PROVIDER = PROVIDER_GOOGLE;
 
 type MCIconName = React.ComponentProps<typeof MaterialCommunityIcons>["name"];
 
@@ -49,6 +46,10 @@ interface ConvoyMapProps {
   showsUserLocation?: boolean;
   /** Called when the map background is tapped (not a marker) */
   onMapPress?: () => void;
+  /** Called when the driver taps "Navigate here" on the regroup pin action sheet. */
+  onRegroupPinNavigate?: (pin: RegroupPin) => void;
+  /** Called when the driver taps "Clear Pin" on the regroup pin action sheet. */
+  onRegroupPinClear?: () => void;
 }
 
 // ─── Gap pulsing ring (lagging vehicle) ──────────────────────────────────────
@@ -287,6 +288,8 @@ export default function ConvoyMap({
   activeSyncCallerId,
   showsUserLocation = false,
   onMapPress,
+  onRegroupPinNavigate,
+  onRegroupPinClear,
 }: ConvoyMapProps) {
   const colors = useColors();
   const mapRef = useRef<MapView>(null);
@@ -527,6 +530,22 @@ export default function ConvoyMap({
             coordinate={{ latitude: regroupPin.lat, longitude: regroupPin.lng }}
             anchor={{ x: 0.5, y: 1 }}
             tracksViewChanges={false}
+            onPress={() => {
+              if (!onRegroupPinNavigate && !onRegroupPinClear) return;
+              Alert.alert(
+                regroupPin.name,
+                `Regroup point set by ${regroupPin.fromVehicleName}`,
+                [
+                  ...(onRegroupPinNavigate
+                    ? [{ text: "Navigate Here", onPress: () => onRegroupPinNavigate(regroupPin) }]
+                    : []),
+                  ...(onRegroupPinClear
+                    ? [{ text: "Clear Pin", style: "destructive" as const, onPress: onRegroupPinClear }]
+                    : []),
+                  { text: "Cancel", style: "cancel" as const },
+                ],
+              );
+            }}
           >
             <RegroupPinMarker name={regroupPin.name} colors={colors} />
           </Marker>

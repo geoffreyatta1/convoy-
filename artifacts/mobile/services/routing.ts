@@ -26,6 +26,10 @@ export interface RouteResult {
   route: Array<{ latitude: number; longitude: number }>;
   totalDistanceM: number;
   totalDurationS: number;
+  /** Traffic-aware duration from Google (duration_in_traffic). Present only when
+   *  departure_time=now is accepted by the API (requires a paid-tier key). Falls
+   *  back to totalDurationS when the field is absent. */
+  totalDurationInTrafficS: number;
 }
 
 export interface GeoResult {
@@ -53,6 +57,8 @@ interface GoogleDirectionsResponse {
     legs: Array<{
       distance: { value: number };
       duration: { value: number };
+      /** Only present when departure_time=now is used and traffic data is available. */
+      duration_in_traffic?: { value: number };
       steps: GoogleDirectionsStep[];
     }>;
     overview_polyline?: { points: string };
@@ -186,11 +192,13 @@ function parseDirectionsResponse(data: GoogleDirectionsResponse): RouteResult | 
 
   let totalDistanceM = 0;
   let totalDurationS = 0;
+  let totalDurationInTrafficS = 0;
   const steps: NavStep[] = [];
 
   for (const leg of route.legs) {
     totalDistanceM += leg.distance.value;
     totalDurationS += leg.duration.value;
+    totalDurationInTrafficS += leg.duration_in_traffic?.value ?? leg.duration.value;
 
     for (const step of leg.steps) {
       // Step-level polyline gives road-accurate coordinates
@@ -221,6 +229,7 @@ function parseDirectionsResponse(data: GoogleDirectionsResponse): RouteResult | 
     route: subsampleRoute(rawCoords),
     totalDistanceM,
     totalDurationS,
+    totalDurationInTrafficS,
   };
 }
 
@@ -259,7 +268,7 @@ export async function fetchRoute(
     const url =
       `${DIRECTIONS_BASE}?origin=${originLat},${originLng}` +
       `&destination=${destLat},${destLng}` +
-      `&mode=driving&key=${GOOGLE_KEY}`;
+      `&mode=driving&departure_time=now&traffic_model=best_guess&key=${GOOGLE_KEY}`;
     const res = await fetch(url);
     const data = await res.json();
     if (data.status !== "OK") {
@@ -290,7 +299,7 @@ export async function fetchRouteViaStop(
       `${DIRECTIONS_BASE}?origin=${originLat},${originLng}` +
       `&destination=${destLat},${destLng}` +
       `&waypoints=${stopLat},${stopLng}` +
-      `&mode=driving&key=${GOOGLE_KEY}`;
+      `&mode=driving&departure_time=now&traffic_model=best_guess&key=${GOOGLE_KEY}`;
     const res = await fetch(url);
     const data = await res.json();
     if (data.status !== "OK") {

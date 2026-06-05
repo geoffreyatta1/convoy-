@@ -174,3 +174,9 @@ export function announceStopRequest(
     "high"
   );
 }
+
+// ─── Regroup ───────────────────────────────────────────────────────────────────
+
+export function announceConvoyRegrouped() {
+  _enqueue("Convoy regrouped!", "high");
+}
