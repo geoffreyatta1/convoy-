@@ -31,6 +31,9 @@
           "audio",
           "location"
         ]
+      },
+      "config": {
+        "googleMapsApiKey": "AIzaSyB2PrKbDG9D5q10k54ipEF9nb6sUsZWj4k"
       }
     },
     "android": {
@@ -43,7 +46,12 @@
         "FOREGROUND_SERVICE",
         "FOREGROUND_SERVICE_MICROPHONE",
         "FOREGROUND_SERVICE_MEDIA_PLAYBACK"
-      ]
+      ],
+      "config": {
+        "googleMaps": {
+          "apiKey": "AIzaSyB2PrKbDG9D5q10k54ipEF9nb6sUsZWj4k"
+        }
+      }
     },
     "web": {
       "favicon": "./assets/images/icon.png"
